@@ -40,6 +40,15 @@ struct StatisticsView: View {
             StatTile(title: "All-time",
                      value: "\(model.totalCompleted())",
                      systemImage: "trophy.fill", tint: .teal)
+            StatTile(title: "Worked today",
+                     value: TimeFormatting.humanDuration(model.netWorkedToday()),
+                     systemImage: "briefcase.fill", tint: .blue)
+            StatTile(title: "Clock-ins",
+                     value: "\(model.clockInsToday())",
+                     systemImage: "clock.badge.checkmark", tint: .purple)
+            StatTile(title: "Break time",
+                     value: TimeFormatting.humanDuration(model.breakTimeToday()),
+                     systemImage: "cup.and.saucer.fill", tint: .brown)
         }
     }
 

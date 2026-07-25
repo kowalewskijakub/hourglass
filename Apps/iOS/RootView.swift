@@ -34,10 +34,16 @@ struct TimerScreen: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimerFaceView(
-            engine: model.engine,
-            sessionsUntilLongBreak: model.settings.sessionsUntilLongBreak
-        )
+        VStack(spacing: 0) {
+            ClockBar(model: model)
+                .padding(.top, 8)
+            Spacer(minLength: 0)
+            TimerFaceView(
+                engine: model.engine,
+                sessionsUntilLongBreak: model.settings.sessionsUntilLongBreak
+            )
+            Spacer(minLength: 0)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(model.engine.kind.tint.opacity(0.06).ignoresSafeArea())
         .keepAwake(model.engine.isRunning)

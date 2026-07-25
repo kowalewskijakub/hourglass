@@ -9,8 +9,54 @@ struct TimerFaceView: View {
     @Bindable var engine: PomodoroEngine
     var sessionsUntilLongBreak: Int
     var compact: Bool = false
+    /// Lay the timer out side-by-side (ring left, controls right) so the whole
+    /// component is wider than it is tall — used by the macOS panel.
+    var horizontal: Bool = false
 
     var body: some View {
+        if horizontal {
+            horizontalBody
+        } else {
+            verticalBody
+        }
+    }
+
+    // MARK: Landscape (macOS panel)
+
+    private var horizontalBody: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                TimerRingView(progress: engine.progress, tint: engine.kind.tint, lineWidth: 7)
+                Text(engine.formattedRemaining)
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            .frame(width: 104, height: 104)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(engine.kind.tint)
+                    .labelStyle(.titleAndIcon)
+
+                controls
+
+                CycleDots(
+                    completedInCycle: engine.focusesCompletedInCycle,
+                    total: sessionsUntilLongBreak,
+                    tint: engine.kind.tint
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .animation(.default, value: engine.kind)
+    }
+
+    // MARK: Portrait (iOS)
+
+    private var verticalBody: some View {
         VStack(spacing: compact ? 10 : 14) {
             Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
                 .font(compact ? .subheadline.weight(.semibold) : .headline)

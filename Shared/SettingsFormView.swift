@@ -39,6 +39,24 @@ struct SettingsFormView: View {
                 Toggle("Show a notification", isOn: $model.settings.notificationsEnabled)
             }
 
+            Section {
+                Toggle("Remind me to clock in", isOn: $model.settings.clockInReminderEnabled)
+                if model.settings.clockInReminderEnabled {
+                    DatePicker("Remind at", selection: reminderTime, displayedComponents: .hourAndMinute)
+                }
+                #if os(macOS)
+                Toggle("Nudge me when I'm active but clocked out", isOn: $model.settings.activityNudgeEnabled)
+                #endif
+            } header: {
+                Text("Workday")
+            } footer: {
+                #if os(macOS)
+                Text("The nudge checks only how long ago you last used the Mac — no keystrokes or clicks are recorded.")
+                #else
+                Text("A daily reminder to start tracking your day.")
+                #endif
+            }
+
             #if os(macOS)
             Section {
                 Picker("Show Hourglass as", selection: $model.settings.macAppMode) {
@@ -53,6 +71,23 @@ struct SettingsFormView: View {
             #endif
         }
         .formStyle(.grouped)
+    }
+
+    /// Bridges the stored hour/minute to a `DatePicker`.
+    private var reminderTime: Binding<Date> {
+        Binding(
+            get: {
+                var comps = DateComponents()
+                comps.hour = model.settings.clockInReminderHour
+                comps.minute = model.settings.clockInReminderMinute
+                return Calendar.current.date(from: comps) ?? Date()
+            },
+            set: { newValue in
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+                model.settings.clockInReminderHour = comps.hour ?? 9
+                model.settings.clockInReminderMinute = comps.minute ?? 0
+            }
+        )
     }
 
     private func minuteStepper(

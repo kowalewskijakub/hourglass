@@ -83,6 +83,54 @@ public struct StatisticsCalculator: Sendable {
         return streak
     }
 
+    // MARK: Workday (clock-in/out) statistics
+
+    /// Clock sessions that started on `day`.
+    private func sessions(_ all: [ClockSession], on day: Date) -> [ClockSession] {
+        all.filter { calendar.isDate($0.clockedInAt, inSameDayAs: day) }
+    }
+
+    /// How many times the user clocked in on `day`.
+    public func clockInCount(in all: [ClockSession], on day: Date) -> Int {
+        sessions(all, on: day).count
+    }
+
+    /// How many of those sessions were closed (clocked out).
+    public func clockOutCount(in all: [ClockSession], on day: Date) -> Int {
+        sessions(all, on: day).filter { !$0.isActive }.count
+    }
+
+    /// Seconds of `range` that fall inside `day` (0 if they don't overlap).
+    private func overlap(_ range: (start: Date, end: Date), with day: Date) -> TimeInterval {
+        guard let dayInterval = calendar.dateInterval(of: .day, for: day) else { return 0 }
+        let start = max(range.start, dayInterval.start)
+        let end = min(range.end, dayInterval.end)
+        return max(0, end.timeIntervalSince(start))
+    }
+
+    /// Clocked-in time that falls on `day`, so a session spanning midnight is
+    /// split across both days rather than counted entirely on its start day.
+    private func grossTime(in all: [ClockSession], on day: Date, asOf now: Date) -> TimeInterval {
+        all.reduce(0) { total, session in
+            total + overlap((session.clockedInAt, session.clockedOutAt ?? now), with: day)
+        }
+    }
+
+    /// Total non-Pomodoro break time on `day`.
+    public func breakTime(in all: [ClockSession], on day: Date, asOf now: Date = Date()) -> TimeInterval {
+        all.reduce(0) { total, session in
+            let sessionEnd = session.clockedOutAt ?? now
+            return total + session.breaks.reduce(0) { breakTotal, entry in
+                breakTotal + overlap((entry.startedAt, min(entry.endedAt ?? sessionEnd, sessionEnd)), with: day)
+            }
+        }
+    }
+
+    /// Worked time on `day` — clocked-in time minus non-Pomodoro breaks.
+    public func netWorkedTime(in all: [ClockSession], on day: Date, asOf now: Date = Date()) -> TimeInterval {
+        max(0, grossTime(in: all, on: day, asOf: now) - breakTime(in: all, on: day, asOf: now))
+    }
+
     // MARK: Daily breakdown (for bar charts)
 
     /// One entry per day for the last `days` days, oldest first, ending on `now`.

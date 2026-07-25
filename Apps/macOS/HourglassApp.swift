@@ -22,6 +22,7 @@ final class MacAppController: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private let notifier = MacNotifier()
     private var statusItemController: StatusItemController!
+    private var activityWatcher: ActivityWatcher!
 
     private var mainWindow: NSWindow?
     private var statsWindow: NSWindow?
@@ -36,7 +37,7 @@ final class MacAppController: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory) // dock-less, always
         notifier.configure()
 
-        model.engine.onSessionCompleted = { [weak self] session in
+        model.onSessionCompleted = { [weak self] session in
             guard let self else { return }
             notifier.sessionFinished(
                 kind: session.kind,
@@ -44,6 +45,16 @@ final class MacAppController: NSObject, NSApplicationDelegate {
                 playSound: model.settings.soundEnabled
             )
         }
+
+        refreshClockInReminder()
+        model.workday.onClockStateChanged = { [weak self] _ in
+            self?.refreshClockInReminder()
+        }
+        activityWatcher = ActivityWatcher(
+            isClockedIn: { [weak self] in self?.model.workday.isClockedIn ?? true },
+            isEnabled: { [weak self] in self?.model.settings.activityNudgeEnabled ?? false }
+        )
+        activityWatcher.start()
 
         statusItemController = StatusItemController(engine: model.engine) { [weak self] in
             guard let self else { return AnyView(EmptyView()) }
@@ -71,39 +82,61 @@ final class MacAppController: NSObject, NSApplicationDelegate {
     }
 
     func openStats() {
-        present(&statsWindow, title: "Statistics", size: NSSize(width: 560, height: 460),
+        present(&statsWindow, title: "Statistics", size: NSSize(width: 620, height: 560),
+                minSize: NSSize(width: 460, height: 420),
                 content: AnyView(StatisticsView(model: model)))
     }
 
     func openLog() {
-        present(&logWindow, title: "Log", size: NSSize(width: 480, height: 520),
+        present(&logWindow, title: "Log", size: NSSize(width: 520, height: 620),
+                minSize: NSSize(width: 400, height: 360),
                 content: AnyView(NavigationStack { LogView(model: model) }))
     }
 
     func openSettings() {
-        present(&settingsWindow, title: "Settings", size: NSSize(width: 460, height: 460),
+        present(&settingsWindow, title: "Settings", size: NSSize(width: 500, height: 620),
+                minSize: NSSize(width: 420, height: 420),
                 content: AnyView(SettingsFormView(model: model)))
     }
 
     func quit() { NSApp.terminate(nil) }
 
+    private func refreshClockInReminder() {
+        ClockInReminder.apply(settings: model.settings, isClockedIn: model.workday.isClockedIn)
+    }
+
     // MARK: Floating window helper
 
-    private func present(_ window: inout NSWindow?, title: String, size: NSSize? = nil, content: AnyView) {
+    private func present(
+        _ window: inout NSWindow?,
+        title: String,
+        size: NSSize? = nil,
+        minSize: NSSize? = nil,
+        content: AnyView
+    ) {
         if let existing = window {
             bringToFront(existing)
             return
         }
+        let contentSize = size ?? NSSize(width: 340, height: 260)
         let newWindow = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size ?? NSSize(width: 280, height: 420)),
+            contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         newWindow.title = title
         newWindow.isReleasedWhenClosed = false
-        newWindow.contentViewController = NSHostingController(rootView: content)
-        if size == nil { newWindow.styleMask.remove(.resizable) } // panel-sized windows stay fixed
+
+        let hosting = NSHostingController(rootView: content)
+        // Give the hosting view an explicit size so SwiftUI doesn't collapse the
+        // window to its minimum intrinsic height when it first appears.
+        hosting.view.frame = NSRect(origin: .zero, size: contentSize)
+        newWindow.contentViewController = hosting
+        newWindow.setContentSize(contentSize)
+        if let minSize { newWindow.contentMinSize = minSize }
+        if size == nil { newWindow.styleMask.remove(.resizable) } // panel windows stay fixed
+
         newWindow.level = .floating // always on top
         newWindow.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         newWindow.center()
@@ -135,11 +168,12 @@ final class MacAppController: NSObject, NSApplicationDelegate {
     /// edits (durations, sound, …) have no window side effects.
     private func observeSettings() {
         withObservationTracking {
-            _ = model.settings.macAppMode
+            _ = model.settings
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 if self.model.settings.macAppMode != self.lastAppliedMode { self.applyMode() }
+                self.refreshClockInReminder()
                 self.observeSettings()
             }
         }

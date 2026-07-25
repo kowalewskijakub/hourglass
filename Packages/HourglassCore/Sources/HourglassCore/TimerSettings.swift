@@ -28,6 +28,14 @@ public struct TimerSettings: Codable, Sendable, Equatable {
     public var macAppMode: MacAppMode
     /// macOS window mode: keep the window above other windows.
     public var macKeepWindowOnTop: Bool
+    /// Send a daily notification reminding you to clock in.
+    public var clockInReminderEnabled: Bool
+    /// Hour of day (0-23) for the clock-in reminder.
+    public var clockInReminderHour: Int
+    /// Minute of the hour for the clock-in reminder.
+    public var clockInReminderMinute: Int
+    /// macOS: nudge to clock in when you're active at the machine while clocked out.
+    public var activityNudgeEnabled: Bool
 
     public init(
         focusDuration: TimeInterval = 25 * 60,
@@ -39,7 +47,11 @@ public struct TimerSettings: Codable, Sendable, Equatable {
         soundEnabled: Bool = true,
         notificationsEnabled: Bool = true,
         macAppMode: MacAppMode = .menuBar,
-        macKeepWindowOnTop: Bool = false
+        macKeepWindowOnTop: Bool = false,
+        clockInReminderEnabled: Bool = false,
+        clockInReminderHour: Int = 9,
+        clockInReminderMinute: Int = 0,
+        activityNudgeEnabled: Bool = false
     ) {
         self.focusDuration = focusDuration
         self.shortBreakDuration = shortBreakDuration
@@ -51,6 +63,10 @@ public struct TimerSettings: Codable, Sendable, Equatable {
         self.notificationsEnabled = notificationsEnabled
         self.macAppMode = macAppMode
         self.macKeepWindowOnTop = macKeepWindowOnTop
+        self.clockInReminderEnabled = clockInReminderEnabled
+        self.clockInReminderHour = min(23, max(0, clockInReminderHour))
+        self.clockInReminderMinute = min(59, max(0, clockInReminderMinute))
+        self.activityNudgeEnabled = activityNudgeEnabled
     }
 
     /// The default Pomodoro configuration (25 / 5 / 15, long break every 4).
@@ -79,5 +95,9 @@ public struct TimerSettings: Codable, Sendable, Equatable {
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? d.notificationsEnabled
         macAppMode = try c.decodeIfPresent(MacAppMode.self, forKey: .macAppMode) ?? d.macAppMode
         macKeepWindowOnTop = try c.decodeIfPresent(Bool.self, forKey: .macKeepWindowOnTop) ?? d.macKeepWindowOnTop
+        clockInReminderEnabled = try c.decodeIfPresent(Bool.self, forKey: .clockInReminderEnabled) ?? d.clockInReminderEnabled
+        clockInReminderHour = try c.decodeIfPresent(Int.self, forKey: .clockInReminderHour) ?? d.clockInReminderHour
+        clockInReminderMinute = try c.decodeIfPresent(Int.self, forKey: .clockInReminderMinute) ?? d.clockInReminderMinute
+        activityNudgeEnabled = try c.decodeIfPresent(Bool.self, forKey: .activityNudgeEnabled) ?? d.activityNudgeEnabled
     }
 }
