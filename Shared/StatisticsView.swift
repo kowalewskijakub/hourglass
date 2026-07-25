@@ -2,93 +2,111 @@ import SwiftUI
 import Charts
 import HourglassCore
 
-/// Focus statistics — summary tiles plus a 7-day focus-minutes bar chart.
-/// Shared by the macOS Statistics window and the iOS Stats tab.
+/// Focus statistics — leads with today's headline, then a week chart, then a
+/// short "all time" footer. Deliberately sparse: one thing to look at first.
 struct StatisticsView: View {
     var model: AppModel
 
     private var days: [DailyStat] { model.dailyStats(lastDays: 7) }
+    private var focusMinutes: Int { model.focusMinutesToday() }
+    private var streak: Int { model.currentStreak() }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                summaryTiles
+            VStack(alignment: .leading, spacing: 24) {
+                headline
+                weekChart
+                footer
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Last 7 days")
-                        .font(.headline)
-                    chart
-                        .frame(height: 220)
+    // MARK: Headline — the single number that matters today
+
+    private var headline: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(encouragement)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(focusMinutes)")
+                    .font(.system(size: 52, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("min focused today")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 14) {
+                inlineStat("\(model.completedToday())", "sessions", "checkmark.circle.fill", .green)
+                if streak > 0 {
+                    inlineStat("\(streak)", streak == 1 ? "day streak" : "day streak", "flame.fill", .orange)
+                }
+                if model.netWorkedToday() > 0 {
+                    inlineStat(TimeFormatting.humanDuration(model.netWorkedToday()), "worked", "briefcase.fill", .blue)
                 }
             }
-            .padding()
+            .padding(.top, 4)
         }
     }
 
-    private var summaryTiles: some View {
-        let columns = [GridItem(.adaptive(minimum: 130), spacing: 12)]
-        return LazyVGrid(columns: columns, spacing: 12) {
-            StatTile(title: "Focus today",
-                     value: "\(model.focusMinutesToday()) min",
-                     systemImage: "clock.fill", tint: .indigo)
-            StatTile(title: "Sessions today",
-                     value: "\(model.completedToday())",
-                     systemImage: "checkmark.circle.fill", tint: .green)
-            StatTile(title: "Streak",
-                     value: "\(model.currentStreak()) day\(model.currentStreak() == 1 ? "" : "s")",
-                     systemImage: "flame.fill", tint: .orange)
-            StatTile(title: "All-time",
-                     value: "\(model.totalCompleted())",
-                     systemImage: "trophy.fill", tint: .teal)
-            StatTile(title: "Worked today",
-                     value: TimeFormatting.humanDuration(model.netWorkedToday()),
-                     systemImage: "briefcase.fill", tint: .blue)
-            StatTile(title: "Clock-ins",
-                     value: "\(model.clockInsToday())",
-                     systemImage: "clock.badge.checkmark", tint: .purple)
-            StatTile(title: "Break time",
-                     value: TimeFormatting.humanDuration(model.breakTimeToday()),
-                     systemImage: "cup.and.saucer.fill", tint: .brown)
+    /// A nudge that reflects how the day is actually going.
+    private var encouragement: String {
+        switch (focusMinutes, streak) {
+        case (0, _): return "A fresh start — one session is all it takes."
+        case (1...25, _): return "You're underway. Keep the momentum."
+        case (26...60, _): return "Solid focus today."
+        case (_, let s) where s >= 3: return "Strong day, and a streak to match."
+        default: return "Excellent focus today."
         }
     }
 
-    private var chart: some View {
-        Chart(days) { day in
-            BarMark(
-                x: .value("Day", day.date, unit: .day),
-                y: .value("Focus (min)", day.focusMinutes)
-            )
-            .foregroundStyle(Color.indigo.gradient)
-            .cornerRadius(5)
+    private func inlineStat(_ value: String, _ label: String, _ symbol: String, _ tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(value).fontWeight(.semibold).monospacedDigit()
+            Text(label).foregroundStyle(.secondary)
         }
-        .chartXAxis {
-            AxisMarks(values: .stride(by: .day)) { value in
-                AxisValueLabel(format: .dateTime.weekday(.narrow))
+        .font(.callout)
+    }
+
+    // MARK: Week
+
+    private var weekChart: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("This week")
+                .font(.headline)
+            Chart(days) { day in
+                BarMark(
+                    x: .value("Day", day.date, unit: .day),
+                    y: .value("Focus (min)", day.focusMinutes)
+                )
+                .foregroundStyle(Color.indigo.gradient)
+                .cornerRadius(5)
             }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day)) { _ in
+                    AxisValueLabel(format: .dateTime.weekday(.narrow))
+                }
+            }
+            .chartYAxis { AxisMarks(position: .leading) }
+            .frame(height: 180)
         }
-        .chartYAxis { AxisMarks(position: .leading) }
     }
-}
 
-/// A single summary metric card.
-private struct StatTile: View {
-    var title: String
-    var value: String
-    var systemImage: String
-    var tint: Color
+    // MARK: All time
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: systemImage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .labelStyle(.titleAndIcon)
-            Text(value)
-                .font(.title2.weight(.semibold))
-                .monospacedDigit()
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "trophy.fill").foregroundStyle(.teal)
+            Text("\(model.totalCompleted()) sessions all time")
+            Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .adaptiveGlass(in: RoundedRectangle(cornerRadius: 16), tint: tint.opacity(0.22))
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 }

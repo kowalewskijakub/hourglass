@@ -45,7 +45,8 @@ struct ClockBar: View {
     }
 
     private var statusText: String {
-        guard workday.isClockedIn else { return "Clocked out" }
-        return workday.isOnBreak ? "On break" : "Clocked in"
+        guard let session = workday.currentSession else { return "Clocked out" }
+        let since = session.clockedInAt.formatted(date: .omitted, time: .shortened)
+        return workday.isOnBreak ? "On break · since \(since)" : "Clocked in · \(since)"
     }
 }

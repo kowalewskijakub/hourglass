@@ -15,3 +15,6 @@ xcuserdata/
 # SwiftPM
 .swiftpm/
 Package.resolved
+
+# Sync credentials (never commit)
+Sync/SyncConfig.swift

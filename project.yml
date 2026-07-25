@@ -21,12 +21,9 @@ settings:
 packages:
   HourglassCore:
     path: Packages/HourglassCore
-  # Real-time sync (Supabase) — confirmed to compile against this SDK. Re-add the
-  # `- package: Supabase` target deps below and wire Sync/SyncService once the
-  # Supabase project credentials are in place. See Sync/SYNC.md.
-  # Supabase:
-  #   url: https://github.com/supabase/supabase-swift
-  #   from: "2.0.0"
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: "2.0.0"
 
 targets:
   # ---------- macOS: menu-bar / floating-window timer ----------
@@ -37,11 +34,13 @@ targets:
     sources:
       - path: Apps/macOS
       - path: Shared
+      - path: Sync
+        excludes: ["*.sql", "*.md"]
     dependencies:
       - package: HourglassCore
         product: HourglassCore
-      # - package: Supabase
-      #   product: Supabase
+      - package: Supabase
+        product: Supabase
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hourglass.mac
@@ -65,11 +64,13 @@ targets:
     sources:
       - path: Apps/iOS
       - path: Shared
+      - path: Sync
+        excludes: ["*.sql", "*.md"]
     dependencies:
       - package: HourglassCore
         product: HourglassCore
-      # - package: Supabase
-      #   product: Supabase
+      - package: Supabase
+        product: Supabase
       - target: Hourglass-iOSWidgets
         embed: true
     settings:

@@ -164,6 +164,36 @@ public final class PomodoroEngine {
     /// Scrub backward to the previous phase (clamped at the first focus).
     public func goToPreviousPhase() { move(to: cyclePosition - 1) }
 
+    /// Adopt timer state mirrored from another device.
+    ///
+    /// The countdown is reconstructed locally from `endDate`, so the two devices
+    /// agree without streaming ticks. Callbacks are intentionally *not* fired —
+    /// this is a mirror of a decision made elsewhere, not a new local action.
+    public func applyRemoteState(cyclePosition: Int, isRunning: Bool, endDate: Date?) {
+        clock.cancel()
+        self.cyclePosition = max(0, cyclePosition)
+
+        if isRunning, let endDate {
+            let remaining = max(0, endDate.timeIntervalSince(clock.now))
+            guard remaining > 0 else {
+                self.endDate = nil
+                phase = .idle
+                self.remaining = plannedDuration
+                return
+            }
+            self.endDate = endDate
+            self.remaining = remaining
+            if currentSessionStart == nil { currentSessionStart = clock.now }
+            phase = .running
+            scheduleTicks()
+        } else {
+            self.endDate = nil
+            currentSessionStart = nil
+            phase = .idle
+            remaining = plannedDuration
+        }
+    }
+
     /// Recompute against the wall clock — call when returning to the foreground.
     public func refresh() {
         guard phase == .running else { return }

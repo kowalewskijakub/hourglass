@@ -5,12 +5,18 @@ import HourglassCore
 
 @main
 struct HourglassApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
     @State private var scheduler = NotificationScheduler()
     @State private var liveActivity = LiveActivityController()
+    @State private var sync: SyncService
     private let notificationDelegate = NotificationDelegate()
 
     init() {
+        let model = AppModel()
+        let sync = SyncService(model: model)
+        model.sync = sync
+        _model = State(initialValue: model)
+        _sync = State(initialValue: sync)
         UNUserNotificationCenter.current().delegate = notificationDelegate
     }
 
@@ -52,6 +58,7 @@ struct HourglassApp: App {
         }
 
         refreshReminder()
+        Task { await sync.restore() }
     }
 
     private func refreshReminder() {

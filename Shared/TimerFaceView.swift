@@ -27,19 +27,19 @@ struct TimerFaceView: View {
         HStack(spacing: 16) {
             ZStack {
                 TimerRingView(progress: engine.progress, tint: engine.kind.tint, lineWidth: 7)
-                Text(engine.formattedRemaining)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+                VStack(spacing: 1) {
+                    Text(engine.formattedRemaining)
+                        .font(.system(size: 25, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text(engine.kind.displayName)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(engine.kind.tint)
+                }
             }
-            .frame(width: 104, height: 104)
+            .frame(width: 108, height: 108)
 
             VStack(alignment: .leading, spacing: 10) {
-                Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(engine.kind.tint)
-                    .labelStyle(.titleAndIcon)
-
                 controls
 
                 CycleDots(
@@ -58,21 +58,22 @@ struct TimerFaceView: View {
 
     private var verticalBody: some View {
         VStack(spacing: compact ? 10 : 14) {
-            Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
-                .font(compact ? .subheadline.weight(.semibold) : .headline)
-                .foregroundStyle(engine.kind.tint)
-                .labelStyle(.titleAndIcon)
-
             ZStack {
                 TimerRingView(
                     progress: engine.progress,
                     tint: engine.kind.tint,
                     lineWidth: compact ? 8 : 12
                 )
-                Text(engine.formattedRemaining)
-                    .font(.system(size: compact ? 34 : 52, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+                VStack(spacing: 2) {
+                    Text(engine.formattedRemaining)
+                        .font(.system(size: compact ? 34 : 52, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
+                        .font(compact ? .caption2 : .footnote.weight(.medium))
+                        .foregroundStyle(engine.kind.tint)
+                        .labelStyle(.titleAndIcon)
+                }
             }
             .frame(width: compact ? 132 : 190, height: compact ? 132 : 190)
 

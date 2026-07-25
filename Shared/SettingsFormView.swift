@@ -39,7 +39,7 @@ struct SettingsFormView: View {
                 Toggle("Show a notification", isOn: $model.settings.notificationsEnabled)
             }
 
-            Section {
+            Section("Workday") {
                 Toggle("Remind me to clock in", isOn: $model.settings.clockInReminderEnabled)
                 if model.settings.clockInReminderEnabled {
                     DatePicker("Remind at", selection: reminderTime, displayedComponents: .hourAndMinute)
@@ -47,26 +47,18 @@ struct SettingsFormView: View {
                 #if os(macOS)
                 Toggle("Nudge me when I'm active but clocked out", isOn: $model.settings.activityNudgeEnabled)
                 #endif
-            } header: {
-                Text("Workday")
-            } footer: {
-                #if os(macOS)
-                Text("The nudge checks only how long ago you last used the Mac — no keystrokes or clicks are recorded.")
-                #else
-                Text("A daily reminder to start tracking your day.")
-                #endif
+            }
+
+            if let sync = model.sync {
+                SyncSettingsSection(sync: sync)
             }
 
             #if os(macOS)
-            Section {
+            Section("Window") {
                 Picker("Show Hourglass as", selection: $model.settings.macAppMode) {
                     Text("Menu-bar app").tag(MacAppMode.menuBar)
                     Text("Floating window").tag(MacAppMode.window)
                 }
-            } header: {
-                Text("Window")
-            } footer: {
-                Text("All windows stay dock-less and always on top.")
             }
             #endif
         }

@@ -20,6 +20,7 @@ struct HourglassApp: App {
 @MainActor
 final class MacAppController: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    private var sync: SyncService!
     private let notifier = MacNotifier()
     private var statusItemController: StatusItemController!
     private var activityWatcher: ActivityWatcher!
@@ -36,6 +37,10 @@ final class MacAppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // dock-less, always
         notifier.configure()
+
+        sync = SyncService(model: model)
+        model.sync = sync
+        Task { await sync.restore() }
 
         model.onSessionCompleted = { [weak self] session in
             guard let self else { return }

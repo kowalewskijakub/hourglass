@@ -13,7 +13,7 @@ struct LogView: View {
 
     var body: some View {
         Group {
-            if model.logDays.isEmpty {
+            if model.logWorkdays.isEmpty {
                 ContentUnavailableView(
                     "Nothing logged yet",
                     systemImage: "clock.badge.questionmark",
@@ -21,10 +21,19 @@ struct LogView: View {
                 )
             } else {
                 List {
-                    ForEach(model.logDays) { day in
-                        Section(dayTitle(day.date)) {
-                            ForEach(day.items) { item in
+                    ForEach(model.logWorkdays) { group in
+                        Section {
+                            // Focus sessions and breaks that happened inside this
+                            // workday, indented under it.
+                            ForEach(group.children) { item in
                                 row(for: item)
+                                    .padding(.leading, group.clockSession == nil ? 0 : 14)
+                            }
+                        } header: {
+                            if let clockSession = group.clockSession {
+                                workdayHeader(clockSession)
+                            } else {
+                                Text("Outside a workday")
                             }
                         }
                     }
@@ -36,12 +45,8 @@ struct LogView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button("Add", systemImage: "plus") { isAdding = true }
             }
-            if !model.logDays.isEmpty {
-                ToolbarItem(placement: .destructiveAction) {
-                    Button("Clear All", systemImage: "trash", role: .destructive) {
-                        model.clearHistory()
-                    }
-                }
+            ToolbarItem(placement: .automatic) {
+                LogExportButton(model: model)
             }
         }
         .sheet(item: $editingSession) { session in
@@ -67,6 +72,36 @@ struct LogView: View {
                 isNew: true,
                 onSave: model.addSession
             )
+        }
+    }
+
+    /// A workday section header — the container the nested items belong to.
+    private func workdayHeader(_ session: ClockSession) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: session.isActive ? "clock.badge.checkmark" : "clock")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(dayTitle(session.clockedInAt))
+                    .font(.subheadline.weight(.semibold))
+                Text(clockRange(session))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(TimeFormatting.humanDuration(session.netDuration()))
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .textCase(nil)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { editingClock = session }
+        .contextMenu {
+            Button("Edit", systemImage: "pencil") { editingClock = session }
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                model.deleteClockSession(id: session.id)
+            }
         }
     }
 

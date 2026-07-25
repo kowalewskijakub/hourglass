@@ -39,25 +39,38 @@ final class AppModel {
     var onSessionInterrupted: (@MainActor (_ ended: Bool) -> Void)?
     var onSessionCompleted: (@MainActor (FocusSession) -> Void)?
 
+    /// Cross-device sync, attached by the app at launch (nil until then).
+    @ObservationIgnored weak var sync: SyncService?
+
     private func installEngineHooks() {
         engine.onSessionStarted = { [weak self] kind, secondsRemaining in
             guard let self else { return }
             // Starting a focus session implies you're working: clock in.
             if kind == .focus { workday.clockIn() }
+            sync?.pushLiveState()
             onSessionStarted?(kind, secondsRemaining)
         }
         engine.onSessionInterrupted = { [weak self] ended in
-            self?.onSessionInterrupted?(ended)
+            guard let self else { return }
+            sync?.pushLiveState()
+            onSessionInterrupted?(ended)
         }
         engine.onSessionCompleted = { [weak self] session in
-            self?.onSessionCompleted?(session)
+            guard let self else { return }
+            sync?.pushSession(session)
+            sync?.pushLiveState()
+            onSessionCompleted?(session)
         }
     }
 
-    /// Bindable settings that persist on every change.
+    /// Bindable settings that persist on every change (and sync to other devices).
     var settings: TimerSettings {
         get { settingsStore.settings }
-        set { settingsStore.settings = newValue }
+        set {
+            guard newValue != settingsStore.settings else { return }
+            settingsStore.settings = newValue
+            sync?.pushSettings()
+        }
     }
 
     // MARK: - Statistics (recomputed live as history changes)
@@ -125,6 +138,53 @@ final class AppModel {
             .sorted { $0.date > $1.date }
     }
 
+    /// The log as workdays with the focus sessions and breaks that happened
+    /// inside them nested underneath, newest day first. Anything recorded while
+    /// clocked out is collected in a trailing "unassigned" group.
+    var logWorkdays: [LogWorkday] {
+        let sessions = historyStore.all().filter(\.completed)
+        var claimed = Set<FocusSession.ID>()
+
+        let workdays: [LogWorkday] = workday.sessions()
+            .sorted { $0.clockedInAt > $1.clockedInAt }
+            .map { clockSession in
+                let end = clockSession.clockedOutAt ?? Date.distantFuture
+                let inside = sessions.filter { session in
+                    session.startedAt >= clockSession.clockedInAt && session.startedAt <= end
+                }
+                inside.forEach { claimed.insert($0.id) }
+
+                var children: [LogItem] = inside.map { .session($0) }
+                children += clockSession.breaks.map {
+                    .workBreak(sessionID: clockSession.id, entry: $0)
+                }
+                return LogWorkday(
+                    clockSession: clockSession,
+                    children: children.sorted { $0.startedAt > $1.startedAt }
+                )
+            }
+
+        let orphans = sessions
+            .filter { !claimed.contains($0.id) }
+            .sorted { $0.startedAt > $1.startedAt }
+            .map { LogItem.session($0) }
+
+        return workdays + (orphans.isEmpty ? [] : [LogWorkday(clockSession: nil, children: orphans)])
+    }
+
+    /// The whole log as CSV, for export.
+    func exportCSV() -> String {
+        var lines = ["type,start,end,duration_minutes"]
+        let formatter = ISO8601DateFormatter()
+        for item in logItems.sorted(by: { $0.startedAt < $1.startedAt }) {
+            let minutes = String(format: "%.1f", item.duration / 60)
+            let start = formatter.string(from: item.startedAt)
+            let end = formatter.string(from: item.startedAt.addingTimeInterval(item.duration))
+            lines.append("\(item.exportKind),\(start),\(end),\(minutes)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func addSession(_ session: FocusSession) { historyStore.add(session) }
     func updateSession(_ session: FocusSession) { historyStore.update(session) }
     func deleteSession(id: FocusSession.ID) { historyStore.delete(id: id) }
@@ -170,6 +230,14 @@ struct LogDay: Identifiable {
     var id: Date { date }
 }
 
+/// A workday and everything recorded inside it. `clockSession` is nil for the
+/// trailing group of items recorded while clocked out.
+struct LogWorkday: Identifiable {
+    let clockSession: ClockSession?
+    let children: [LogItem]
+    var id: UUID { clockSession?.id ?? UUID(uuidString: "00000000-0000-0000-0000-0000000000FF")! }
+}
+
 /// A single row in the unified log — a Pomodoro session, a clocked-in stretch,
 /// or a non-Pomodoro break.
 enum LogItem: Identifiable {
@@ -198,6 +266,15 @@ enum LogItem: Identifiable {
         case .session(let s): return s.plannedDuration
         case .clock(let c): return c.grossDuration()
         case .workBreak(_, let b): return b.duration()
+        }
+    }
+
+    /// Stable label used in the CSV export.
+    var exportKind: String {
+        switch self {
+        case .session(let s): return s.kind.rawValue
+        case .clock: return "workday"
+        case .workBreak: return "break"
         }
     }
 }
