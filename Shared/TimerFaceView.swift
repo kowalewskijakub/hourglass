@@ -11,9 +11,9 @@ struct TimerFaceView: View {
     var compact: Bool = false
 
     var body: some View {
-        VStack(spacing: compact ? 14 : 24) {
+        VStack(spacing: compact ? 10 : 14) {
             Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
-                .font(compact ? .headline : .title3.weight(.semibold))
+                .font(compact ? .subheadline.weight(.semibold) : .headline)
                 .foregroundStyle(engine.kind.tint)
                 .labelStyle(.titleAndIcon)
 
@@ -21,14 +21,14 @@ struct TimerFaceView: View {
                 TimerRingView(
                     progress: engine.progress,
                     tint: engine.kind.tint,
-                    lineWidth: compact ? 10 : 16
+                    lineWidth: compact ? 8 : 12
                 )
                 Text(engine.formattedRemaining)
-                    .font(.system(size: compact ? 46 : 76, weight: .semibold, design: .rounded))
+                    .font(.system(size: compact ? 34 : 52, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
             }
-            .frame(width: compact ? 168 : 264, height: compact ? 168 : 264)
+            .frame(width: compact ? 132 : 190, height: compact ? 132 : 190)
 
             CycleDots(
                 completedInCycle: engine.focusesCompletedInCycle,
@@ -42,12 +42,12 @@ struct TimerFaceView: View {
                 resetButton
             }
         }
-        .padding(compact ? 14 : 28)
+        .padding(compact ? 10 : 18)
         .animation(.default, value: engine.kind)
     }
 
     private var controls: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 6) {
             arrow("chevron.backward", help: "Previous phase") { engine.goToPreviousPhase() }
 
             Button {
@@ -55,9 +55,11 @@ struct TimerFaceView: View {
             } label: {
                 Label(engine.isRunning ? "Pause" : "Start",
                       systemImage: engine.isRunning ? "pause.fill" : "play.fill")
-                    .frame(minWidth: 96)
+                    .font(.callout)
+                    .frame(minWidth: 78)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
             .tint(engine.kind.tint)
 
             arrow("chevron.forward", help: "Next phase") { engine.goToNextPhase() }
@@ -67,9 +69,10 @@ struct TimerFaceView: View {
     private func arrow(_ symbol: String, help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.title2)
+                .font(.body.weight(.medium))
                 .foregroundStyle(.secondary)
-                .padding(8)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

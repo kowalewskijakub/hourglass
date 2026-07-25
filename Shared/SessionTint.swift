@@ -13,7 +13,7 @@ extension SessionKind {
 
     var symbolName: String {
         switch self {
-        case .focus: return "star.fill"
+        case .focus: return "apple.intelligence"
         case .shortBreak: return "cup.and.saucer.fill"
         case .longBreak: return "figure.walk"
         }

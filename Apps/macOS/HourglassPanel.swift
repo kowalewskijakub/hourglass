@@ -9,7 +9,7 @@ struct HourglassPanel: View {
     let controller: MacAppController
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             TimerFaceView(
                 engine: model.engine,
                 sessionsUntilLongBreak: model.settings.sessionsUntilLongBreak,
@@ -29,10 +29,11 @@ struct HourglassPanel: View {
 
             HStack(spacing: 16) {
                 iconButton("chart.bar", "Statistics") { controller.openStats() }
-                iconButton("list.bullet.rectangle", "Log") { controller.openLog() }
-                iconButton("gearshape", "Settings") { controller.openSettings() }
                 Spacer()
                 Menu {
+                    Button("Log", systemImage: "list.bullet.rectangle") { controller.openLog() }
+                    Button("Settings…", systemImage: "gearshape") { controller.openSettings() }
+                    Divider()
                     Button("Quit Hourglass") { controller.quit() }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -47,8 +48,8 @@ struct HourglassPanel: View {
             }
             .padding(.horizontal, 6)
         }
-        .padding(16)
-        .frame(width: 264)
+        .padding(12)
+        .frame(width: 216)
     }
 
     private func iconButton(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
