@@ -1,0 +1,17 @@
+# Xcode / generated project
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+build/
+.build/
+
+# macOS
+.DS_Store
+
+# User settings
+xcuserdata/
+*.xcuserstate
+
+# SwiftPM
+.swiftpm/
+Package.resolved
