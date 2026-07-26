@@ -59,16 +59,26 @@ final class SyncService {
     }
 
     /// Verifies the emailed code and starts syncing.
+    ///
+    /// The code's OTP type depends on the account's history — a brand-new
+    /// address confirms via `signup`, later sign-ins via `magiclink`/`email` —
+    /// so we try each rather than making the user care which one they got.
     func verifyCode(_ code: String, email: String) async {
         isBusy = true
         defer { isBusy = false }
-        do {
-            try await client.auth.verifyOTP(email: email, token: code, type: .email)
-            state = .syncing(email: email)
-            await startSyncing()
-        } catch {
-            state = .failed(error.localizedDescription)
+
+        var lastError: Error?
+        for type in [EmailOTPType.email, .signup, .magiclink] {
+            do {
+                try await client.auth.verifyOTP(email: email, token: code, type: type)
+                state = .syncing(email: email)
+                await startSyncing()
+                return
+            } catch {
+                lastError = error
+            }
         }
+        state = .failed(lastError?.localizedDescription ?? "That code didn't work. Try sending a new one.")
     }
 
     func signOut() async {

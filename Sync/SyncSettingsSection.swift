@@ -22,7 +22,7 @@ struct SyncSettingsSection: View {
                 .disabled(email.isEmpty || sync.isBusy)
 
             case .awaitingCode(let pending):
-                Text("Code sent to \(pending)")
+                Text("We emailed a 6-digit code to \(pending). Enter it below — you don't need to click the link.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 TextField("6-digit code", text: $code)
@@ -33,6 +33,10 @@ struct SyncSettingsSection: View {
                     Task { await sync.verifyCode(code.trimmingCharacters(in: .whitespaces), email: pending) }
                 }
                 .disabled(code.isEmpty || sync.isBusy)
+                Button("Send a new code") {
+                    Task { await sync.sendCode(to: pending) }
+                }
+                .disabled(sync.isBusy)
 
             case .syncing(let signedInEmail):
                 LabeledContent("Signed in", value: signedInEmail)
