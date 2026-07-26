@@ -1,47 +1,54 @@
 import SwiftUI
 
-/// Sign-in / status UI for cross-device sync, shown inside Settings.
+/// Sync setup UI: turn sync on, then pair other devices with a one-time code.
+/// No account, no password, no email.
 struct SyncSettingsSection: View {
     @Bindable var sync: SyncService
-    @State private var email = ""
-    @State private var code = ""
+    @State private var enteredCode = ""
+    @State private var isJoining = false
 
     var body: some View {
         Section {
             switch sync.state {
-            case .signedOut, .failed:
-                TextField("Email", text: $email)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.emailAddress)
-                    #endif
-                    .disableAutocorrection(true)
-                Button("Send code") {
-                    Task { await sync.sendCode(to: email.trimmingCharacters(in: .whitespaces)) }
-                }
-                .disabled(email.isEmpty || sync.isBusy)
-
-            case .awaitingCode(let pending):
-                Text("We emailed a 6-digit code to \(pending). Enter it below — you don't need to click the link.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("6-digit code", text: $code)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                Button("Verify") {
-                    Task { await sync.verifyCode(code.trimmingCharacters(in: .whitespaces), email: pending) }
-                }
-                .disabled(code.isEmpty || sync.isBusy)
-                Button("Send a new code") {
-                    Task { await sync.sendCode(to: pending) }
+            case .off, .failed:
+                Button("Turn on sync") {
+                    Task { await sync.enableSync() }
                 }
                 .disabled(sync.isBusy)
 
-            case .syncing(let signedInEmail):
-                LabeledContent("Signed in", value: signedInEmail)
-                Button("Sign out", role: .destructive) {
-                    Task { await sync.signOut() }
+                if isJoining {
+                    TextField("Pairing code", text: $enteredCode)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.characters)
+                        #endif
+                        .disableAutocorrection(true)
+                    Button("Join") {
+                        Task { await sync.redeemPairingCode(enteredCode) }
+                    }
+                    .disabled(enteredCode.isEmpty || sync.isBusy)
+                } else {
+                    Button("Join another device instead") { isJoining = true }
+                }
+
+            case .syncing(let code):
+                Label("Syncing", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+
+                if let code {
+                    LabeledContent("Pairing code", value: SyncService.formatted(code))
+                        .font(.system(.body, design: .monospaced))
+                    Text("Enter this on your other device within 5 minutes. It works once.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Pair another device") {
+                        Task { await sync.createPairingCode() }
+                    }
+                    .disabled(sync.isBusy)
+                }
+
+                Button("Turn off sync", role: .destructive) {
+                    Task { await sync.stopSync() }
                 }
             }
 
@@ -53,7 +60,7 @@ struct SyncSettingsSection: View {
         } header: {
             Text("Sync")
         } footer: {
-            Text("Signs you in with a one-time code by email, then keeps the timer, log and settings in step across your devices.")
+            Text("Keeps the timer, log and settings in step across your devices. No account or password — pair a device with a one-time code.")
         }
     }
 }

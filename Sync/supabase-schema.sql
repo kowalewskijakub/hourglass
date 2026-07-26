@@ -51,3 +51,84 @@ create policy "own settings" on public.settings
 alter publication supabase_realtime add table public.live_state;
 alter publication supabase_realtime add table public.sessions;
 alter publication supabase_realtime add table public.settings;
+
+-- ---------------------------------------------------------------------------
+-- Device pairing (applied 2026-07-26)
+--
+-- Sync uses an anonymous account: the first device creates one, and any other
+-- device joins it by redeeming a short-lived, single-use code. The code is
+-- exchanged for the account's refresh token.
+--
+-- The table holds refresh tokens, so it is locked down twice over: RLS is on
+-- with NO policies, and the table grants are revoked from anon/authenticated.
+-- The only way in is the SECURITY DEFINER functions below. Codes are stored as
+-- SHA-256 hashes, so an active code is never readable at rest.
+--
+-- Requires "Enable anonymous sign-ins" in Authentication -> Sign In / Providers.
+-- ---------------------------------------------------------------------------
+create table if not exists public.device_pairings (
+    code_hash     text primary key,
+    user_id       uuid not null references auth.users (id) on delete cascade,
+    refresh_token text not null,
+    expires_at    timestamptz not null
+);
+
+alter table public.device_pairings enable row level security;
+revoke all on table public.device_pairings from anon, authenticated;
+
+-- Device A publishes its refresh token under a hashed code.
+create or replace function public.create_pairing(p_code text, p_refresh_token text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+    if auth.uid() is null then
+        raise exception 'must be signed in to create a pairing';
+    end if;
+
+    delete from public.device_pairings where expires_at < now();
+
+    insert into public.device_pairings (code_hash, user_id, refresh_token, expires_at)
+    values (
+        encode(sha256(p_code::bytea), 'hex'),
+        auth.uid(),
+        p_refresh_token,
+        now() + interval '5 minutes'
+    )
+    on conflict (code_hash) do update
+        set user_id       = excluded.user_id,
+            refresh_token = excluded.refresh_token,
+            expires_at    = excluded.expires_at;
+end;
+$$;
+
+-- Device B redeems the code exactly once, before it expires. Returns null for a
+-- wrong, used or expired code alike, so codes can't be enumerated.
+create or replace function public.claim_pairing(p_code text)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    v_hash  text := encode(sha256(p_code::bytea), 'hex');
+    v_token text;
+begin
+    delete from public.device_pairings where expires_at < now();
+
+    delete from public.device_pairings
+     where code_hash = v_hash
+       and expires_at >= now()
+    returning refresh_token into v_token;
+
+    return v_token;
+end;
+$$;
+
+revoke all on function public.create_pairing(text, text) from public, anon;
+revoke all on function public.claim_pairing(text) from public;
+grant execute on function public.create_pairing(text, text) to authenticated;
+-- anon needs this: the joining device has no session yet.
+grant execute on function public.claim_pairing(text) to anon, authenticated;

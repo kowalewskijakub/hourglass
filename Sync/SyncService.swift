@@ -14,13 +14,13 @@ import HourglassCore
 final class SyncService {
 
     enum State: Equatable {
-        case signedOut
-        case awaitingCode(email: String)
-        case syncing(email: String)
+        case off
+        /// Syncing; `code` is a pairing code currently on offer to another device.
+        case syncing(code: String?)
         case failed(String)
     }
 
-    private(set) var state: State = .signedOut
+    private(set) var state: State = .off
     /// Set while a network call is in flight, so the UI can show progress.
     private(set) var isBusy = false
 
@@ -41,57 +41,103 @@ final class SyncService {
         )
     }
 
-    var userEmail: String? { client.auth.currentUser?.email }
     var isSignedIn: Bool { client.auth.currentSession != nil }
 
-    // MARK: - Auth (email one-time code)
+    // MARK: - Auth (anonymous account + device pairing)
+    //
+    // There is no account and no password: the first device creates an anonymous
+    // user, and any other device joins it by redeeming a short-lived pairing
+    // code. The code is exchanged for that user's refresh token via a
+    // SECURITY DEFINER function, so the token store itself is never readable.
 
-    /// Sends a 6-digit code to the address.
-    func sendCode(to email: String) async {
+    /// Turns sync on for the first device by creating an anonymous account.
+    func enableSync() async {
         isBusy = true
         defer { isBusy = false }
         do {
-            try await client.auth.signInWithOTP(email: email)
-            state = .awaitingCode(email: email)
+            if !isSignedIn { try await client.auth.signInAnonymously() }
+            state = .syncing(code: nil)
+            await startSyncing()
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
-    /// Verifies the emailed code and starts syncing.
-    ///
-    /// The code's OTP type depends on the account's history — a brand-new
-    /// address confirms via `signup`, later sign-ins via `magiclink`/`email` —
-    /// so we try each rather than making the user care which one they got.
-    func verifyCode(_ code: String, email: String) async {
+    /// Publishes a one-time code another device can use to join this account.
+    func createPairingCode() async {
         isBusy = true
         defer { isBusy = false }
-
-        var lastError: Error?
-        for type in [EmailOTPType.email, .signup, .magiclink] {
-            do {
-                try await client.auth.verifyOTP(email: email, token: code, type: type)
-                state = .syncing(email: email)
-                await startSyncing()
+        do {
+            if !isSignedIn { try await client.auth.signInAnonymously() }
+            guard let refreshToken = client.auth.currentSession?.refreshToken else {
+                state = .failed("Sync isn't ready yet — try again in a moment.")
                 return
-            } catch {
-                lastError = error
             }
+            let code = Self.makePairingCode()
+            try await client
+                .rpc("create_pairing", params: ["p_code": code, "p_refresh_token": refreshToken])
+                .execute()
+            state = .syncing(code: code)
+            await startSyncing()
+        } catch {
+            state = .failed(error.localizedDescription)
         }
-        state = .failed(lastError?.localizedDescription ?? "That code didn't work. Try sending a new one.")
     }
 
-    func signOut() async {
+    /// Joins the account that produced `code`, adopting its data.
+    func redeemPairingCode(_ code: String) async {
+        isBusy = true
+        defer { isBusy = false }
+        let normalized = Self.normalize(code)
+        do {
+            let token: String? = try await client
+                .rpc("claim_pairing", params: ["p_code": normalized])
+                .execute()
+                .value
+            guard let token, !token.isEmpty else {
+                state = .failed("That code is wrong, already used, or expired.")
+                return
+            }
+            try await client.auth.refreshSession(refreshToken: token)
+            state = .syncing(code: nil)
+            await startSyncing()
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    func stopSync() async {
         await stopSyncing()
         try? await client.auth.signOut()
-        state = .signedOut
+        state = .off
     }
 
     /// Resumes an existing session at launch.
     func restore() async {
-        guard let email = client.auth.currentUser?.email else { return }
-        state = .syncing(email: email)
+        guard isSignedIn else { return }
+        state = .syncing(code: nil)
         await startSyncing()
+    }
+
+    // MARK: Pairing codes
+
+    /// Unambiguous alphabet — no 0/O/1/I, so a code is easy to read aloud.
+    private static let codeAlphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+
+    private static func makePairingCode() -> String {
+        String((0..<8).map { _ in codeAlphabet.randomElement()! })
+    }
+
+    /// Accepts what the user actually types: lower case, spaces, dashes.
+    static func normalize(_ code: String) -> String {
+        code.uppercased().filter { codeAlphabet.contains($0) }
+    }
+
+    /// `ABCD-EFGH` — easier to read off another screen.
+    static func formatted(_ code: String) -> String {
+        guard code.count == 8 else { return code }
+        let mid = code.index(code.startIndex, offsetBy: 4)
+        return "\(code[code.startIndex..<mid])-\(code[mid...])"
     }
 
     // MARK: - Sync lifecycle
