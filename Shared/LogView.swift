@@ -12,8 +12,9 @@ struct LogView: View {
     @State private var isAdding = false
 
     var body: some View {
+        let workdays = model.log.workdays
         Group {
-            if model.logWorkdays.isEmpty {
+            if workdays.isEmpty {
                 ContentUnavailableView(
                     "Nothing logged yet",
                     systemImage: "clock.badge.questionmark",
@@ -21,12 +22,12 @@ struct LogView: View {
                 )
             } else {
                 List {
-                    ForEach(model.logWorkdays) { group in
+                    ForEach(workdays) { group in
                         Section {
                             // Focus sessions and breaks that happened inside this
                             // workday, indented under it.
-                            ForEach(group.children) { item in
-                                row(for: item)
+                            ForEach(group.children) { child in
+                                row(for: child)
                             }
                         } header: {
                             if let clockSession = group.clockSession {
@@ -52,7 +53,13 @@ struct LogView: View {
             SessionEditView(session: session, onSave: model.updateSession)
         }
         .sheet(item: $editingClock) { session in
-            ClockEditView(session: session, onSave: model.updateClockSession)
+            ClockEditView(session: session) { clockedInAt, clockedOutAt in
+                model.updateClockSession(
+                    id: session.id,
+                    clockedInAt: clockedInAt,
+                    clockedOutAt: clockedOutAt
+                )
+            }
         }
         .sheet(item: $editingBreak) { edit in
             BreakEditView(entry: edit.entry) { updated in
@@ -105,8 +112,8 @@ struct LogView: View {
     }
 
     @ViewBuilder
-    private func row(for item: LogItem) -> some View {
-        switch item {
+    private func row(for child: LogEntry) -> some View {
+        switch child {
         case .session(let session):
             LogRow(
                 icon: session.kind.symbolName,
@@ -118,19 +125,6 @@ struct LogView: View {
             .modifier(LogRowActions(
                 edit: { editingSession = session },
                 delete: { model.deleteSession(id: session.id) }
-            ))
-
-        case .clock(let clockSession):
-            LogRow(
-                icon: clockSession.isActive ? "clock.badge.checkmark" : "clock",
-                tint: .blue,
-                title: clockSession.isActive ? "Clocked in" : "Workday",
-                subtitle: clockRange(clockSession),
-                trailing: TimeFormatting.humanDuration(clockSession.netDuration())
-            )
-            .modifier(LogRowActions(
-                edit: { editingClock = clockSession },
-                delete: { model.deleteClockSession(id: clockSession.id) }
             ))
 
         case .workBreak(let sessionID, let entry):
@@ -268,15 +262,17 @@ private struct SessionEditView: View {
     }
 }
 
-/// Edit sheet for a clocked-in stretch.
+/// Edit sheet for a clocked-in stretch. Hands back only the two stamps it edits,
+/// never the whole session — the breaks it shows may have moved on since it
+/// opened.
 private struct ClockEditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ClockSession
     @State private var stillClockedIn: Bool
     @State private var clockOut: Date
-    let onSave: (ClockSession) -> Void
+    let onSave: (_ clockedInAt: Date, _ clockedOutAt: Date?) -> Void
 
-    init(session: ClockSession, onSave: @escaping (ClockSession) -> Void) {
+    init(session: ClockSession, onSave: @escaping (_ clockedInAt: Date, _ clockedOutAt: Date?) -> Void) {
         _draft = State(initialValue: session)
         _stillClockedIn = State(initialValue: session.clockedOutAt == nil)
         _clockOut = State(initialValue: session.clockedOutAt ?? Date())
@@ -305,9 +301,7 @@ private struct ClockEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        var saved = draft
-                        saved.clockedOutAt = stillClockedIn ? nil : clockOut
-                        onSave(saved)
+                        onSave(draft.clockedInAt, stillClockedIn ? nil : clockOut)
                         dismiss()
                     }
                 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import HourglassCore
 #if os(macOS)
 import AppKit
 #endif
@@ -21,7 +22,7 @@ struct LogExportButton: View {
     }
 
     private func csvData() -> Data {
-        Data(model.exportCSV().utf8)
+        Data(model.log.exportCSV().utf8)
     }
 
     private func defaultFilename() -> String {

@@ -80,6 +80,58 @@ import Foundation
         #expect(store.all().count == 1)
     }
 
+    // MARK: A Pomodoro started
+
+    @Test func focusSessionClocksInWhenClockedOut() {
+        let (tracker, store, _) = makeTracker()
+        tracker.sessionStarted(kind: .focus)
+        #expect(tracker.isClockedIn)
+        #expect(store.all().count == 1)
+    }
+
+    @Test func breakSessionDoesNotClockIn() {
+        let (tracker, store, _) = makeTracker()
+        tracker.sessionStarted(kind: .shortBreak)
+        #expect(tracker.isClockedIn == false)
+        #expect(store.all().isEmpty)
+    }
+
+    /// Starting any timer means you're back at it, so a running coffee break is
+    /// closed rather than left charging break time against the work you're doing.
+    @Test func startingATimerEndsARunningBreak() {
+        let (tracker, _, clock) = makeTracker()
+        tracker.clockIn()
+        tracker.startBreak()
+        #expect(tracker.isOnBreak)
+
+        clock.jump(by: 300)
+        tracker.sessionStarted(kind: .focus)
+
+        #expect(tracker.isOnBreak == false)
+        #expect(tracker.isClockedIn)
+        #expect(tracker.currentSession?.breakDuration() == 300)
+    }
+
+    /// A break timer ends a coffee break too, without clocking in on its own.
+    @Test func startingABreakTimerEndsARunningBreak() {
+        let (tracker, _, clock) = makeTracker()
+        tracker.clockIn()
+        tracker.startBreak()
+
+        clock.jump(by: 120)
+        tracker.sessionStarted(kind: .longBreak)
+
+        #expect(tracker.isOnBreak == false)
+        #expect(tracker.currentSession?.breakDuration() == 120)
+    }
+
+    @Test func focusSessionWhileAlreadyClockedInDoesNotStartASecondSession() {
+        let (tracker, store, _) = makeTracker()
+        tracker.clockIn()
+        tracker.sessionStarted(kind: .focus)
+        #expect(store.all().count == 1)
+    }
+
     @Test func toggleDrivesClockAndBreak() {
         let (tracker, _, _) = makeTracker()
         tracker.toggleClock()
@@ -114,12 +166,11 @@ import Foundation
         let (tracker, store, clock) = makeTracker()
         tracker.clockIn()
         tracker.startBreak()
-        var session = tracker.currentSession!
+        let session = tracker.currentSession!
         clock.jump(by: 3600)
 
         // Simulate the log editor closing the day while the break still runs.
-        session.clockedOutAt = clock.now
-        tracker.update(session)
+        tracker.updateClockSession(id: session.id, clockedInAt: session.clockedInAt, clockedOutAt: clock.now)
 
         let stored = store.all().first
         #expect(stored?.isActive == false)
@@ -239,6 +290,131 @@ import Foundation
                                endedAt: start.addingTimeInterval(900))]
         )
         #expect(afterBreak.timeSinceLastBreak(asOf: start.addingTimeInterval(1500)) == 600)
+    }
+
+    // MARK: Editing from the log
+
+    /// The log's sheet holds a copy of the session from the moment it opened.
+    /// Anything that changed since — a break started here, a clock-out mirrored
+    /// from another device — must survive the save.
+    @Test func editingTheClockStampsKeepsBreaksTakenWhileTheSheetWasOpen() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        let asTheSheetSawIt = tracker.currentSession!
+        #expect(asTheSheetSawIt.breaks.isEmpty)
+
+        // A break happens while the sheet sits open.
+        clock.jump(by: 600)
+        tracker.startBreak()
+        clock.jump(by: 300)
+        tracker.endBreak()
+
+        // The sheet saves the one field the user moved.
+        let correctedStart = asTheSheetSawIt.clockedInAt.addingTimeInterval(-1800)
+        tracker.updateClockSession(id: asTheSheetSawIt.id, clockedInAt: correctedStart, clockedOutAt: nil)
+
+        let stored = store.all().first
+        #expect(stored?.clockedInAt == correctedStart)
+        #expect(stored?.breaks.count == 1)
+        #expect(stored?.breakDuration(asOf: clock.now) == 300)
+    }
+
+    /// Every edit goes through the same write path as the live clock, so other
+    /// devices hear about it and can tell whose copy is newer.
+    @Test func editsStampUpdatedAtAndAnnounceTheChange() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        let session = tracker.currentSession!
+
+        var announced: [ClockSession] = []
+        tracker.onSessionChanged = { announced.append($0) }
+
+        clock.jump(by: 3600)
+        tracker.updateClockSession(id: session.id, clockedInAt: session.clockedInAt, clockedOutAt: clock.now)
+
+        #expect(announced.count == 1)
+        #expect(announced.first?.id == session.id)
+        #expect(store.all().first?.updatedAt == clock.now)
+    }
+
+    /// The log's date pickers are unbounded, so a day can be saved ending before
+    /// it starts; it's clamped to no length rather than negative time.
+    @Test func aClockOutBeforeTheClockInIsClampedToTheClockIn() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        let session = tracker.currentSession!
+
+        tracker.updateClockSession(
+            id: session.id,
+            clockedInAt: session.clockedInAt,
+            clockedOutAt: session.clockedInAt.addingTimeInterval(-3600)
+        )
+
+        let stored = store.all().first
+        #expect(stored?.clockedOutAt == stored?.clockedInAt)
+        #expect(stored?.grossDuration(asOf: clock.now) == 0)
+        #expect(stored?.netDuration(asOf: clock.now) == 0)
+    }
+
+    @Test func editingABreakLeavesTheRestOfTheSessionAlone() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        tracker.startBreak()
+        clock.jump(by: 300)
+        tracker.endBreak()
+        let session = store.all().first!
+        var entry = session.breaks[0]
+
+        var announced = 0
+        tracker.onSessionChanged = { _ in announced += 1 }
+
+        entry.endedAt = entry.startedAt.addingTimeInterval(900) // it ran longer than logged
+        tracker.updateBreak(sessionID: session.id, entry: entry)
+
+        let stored = store.all().first
+        #expect(stored?.breaks.count == 1)
+        #expect(stored?.breakDuration(asOf: clock.now) == 900)
+        #expect(stored?.clockedInAt == session.clockedInAt)
+        #expect(announced == 1)
+    }
+
+    @Test func deletingABreakRemovesOnlyThatBreak() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        tracker.startBreak()
+        clock.jump(by: 300)
+        tracker.endBreak()
+        clock.jump(by: 600)
+        tracker.startBreak()
+        clock.jump(by: 120)
+        tracker.endBreak()
+
+        let session = store.all().first!
+        #expect(session.breaks.count == 2)
+        tracker.deleteBreak(sessionID: session.id, entryID: session.breaks[0].id)
+
+        let stored = store.all().first
+        #expect(stored?.breaks.map(\.id) == [session.breaks[1].id])
+        #expect(stored?.breakDuration(asOf: clock.now) == 120)
+    }
+
+    /// An edit aimed at something that is no longer there (deleted here, or on
+    /// another device) does nothing rather than resurrecting it.
+    @Test func editsAgainstAMissingRecordAreIgnored() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        let session = tracker.currentSession!
+
+        var announced = 0
+        tracker.onSessionChanged = { _ in announced += 1 }
+
+        tracker.updateClockSession(id: UUID(), clockedInAt: clock.now, clockedOutAt: clock.now)
+        tracker.updateBreak(sessionID: session.id, entry: WorkBreak(startedAt: clock.now))
+        tracker.deleteBreak(sessionID: session.id, entryID: UUID())
+
+        #expect(announced == 0)
+        #expect(store.all().count == 1)
+        #expect(store.all().first?.breaks.isEmpty == true)
     }
 
     @Test func statisticsCountClockInsAndNetTime() {

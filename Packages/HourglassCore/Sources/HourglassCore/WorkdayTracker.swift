@@ -10,9 +10,6 @@ public final class WorkdayTracker {
     private let clock: any PomodoroClock
     private let calendar: Calendar
 
-    /// Fired when the user clocks in or out, so hosts can update reminders.
-    public var onClockStateChanged: (@MainActor (_ clockedIn: Bool) -> Void)?
-
     /// Fired whenever a clock session is created or modified (in/out, breaks,
     /// manual edits), so hosts can mirror it to other devices.
     public var onSessionChanged: (@MainActor (ClockSession) -> Void)?
@@ -57,7 +54,6 @@ public final class WorkdayTracker {
         let session = ClockSession(clockedInAt: clock.now, updatedAt: clock.now)
         store.add(session)
         onSessionChanged?(session)
-        onClockStateChanged?(true)
         return session
     }
 
@@ -80,11 +76,21 @@ public final class WorkdayTracker {
         endActiveBreak(in: &session)
         session.clockedOutAt = clock.now
         persist(session)
-        onClockStateChanged?(false)
     }
 
     public func toggleClock() {
         if isClockedIn { clockOut() } else { clockIn() }
+    }
+
+    /// A Pomodoro started, so the workday follows it: focusing means you're
+    /// working, and starting any timer means you're back at it, so a running
+    /// coffee break ends — leaving it open would keep charging break time
+    /// against the session you're actually working through.
+    ///
+    /// The mirror of `clockOut`, which closes a running break from the other end.
+    public func sessionStarted(kind: SessionKind) {
+        if kind == .focus { clockIn() }
+        endBreak()
     }
 
     /// Begin a non-Pomodoro break (clocking in first if needed).
@@ -107,8 +113,36 @@ public final class WorkdayTracker {
     }
 
     // MARK: Editing (from the log)
+    //
+    // Every edit is keyed by id and re-reads the stored session, applying only
+    // the fields its editor owns. A log sheet can sit open while the session
+    // changes underneath it — a break started on this device, a clock-out
+    // mirrored from another — and handing back the whole session would silently
+    // undo all of it, which is why there is no whole-session write here.
 
-    public func update(_ session: ClockSession) { persist(normalized(session)) }
+    /// The workday editor owns the two clock stamps and nothing else.
+    public func updateClockSession(id: ClockSession.ID, clockedInAt: Date, clockedOutAt: Date?) {
+        guard var session = store.all().first(where: { $0.id == id }) else { return }
+        session.clockedInAt = clockedInAt
+        session.clockedOutAt = clockedOutAt
+        persist(normalized(session))
+    }
+
+    /// The break editor owns one break's stamps.
+    public func updateBreak(sessionID: ClockSession.ID, entry: WorkBreak) {
+        guard var session = store.all().first(where: { $0.id == sessionID }),
+              let index = session.breaks.firstIndex(where: { $0.id == entry.id }) else { return }
+        session.breaks[index] = entry
+        persist(normalized(session))
+    }
+
+    public func deleteBreak(sessionID: ClockSession.ID, entryID: WorkBreak.ID) {
+        guard var session = store.all().first(where: { $0.id == sessionID }),
+              session.breaks.contains(where: { $0.id == entryID }) else { return }
+        session.breaks.removeAll { $0.id == entryID }
+        persist(normalized(session))
+    }
+
     public func add(_ session: ClockSession) {
         var session = normalized(session)
         session.updatedAt = clock.now
@@ -120,9 +154,9 @@ public final class WorkdayTracker {
         onSessionDeleted?(id)
     }
 
-    /// Applies a session mirrored from another device, without echoing it back.
-    /// Adopts a session mirrored from another device, unless what we hold is
-    /// newer — otherwise a stale copy would silently undo a local edit.
+    /// Adopts a session mirrored from another device without echoing it back,
+    /// unless what we hold is newer — a stale copy would silently undo a local
+    /// edit.
     public func applyRemote(_ session: ClockSession) {
         guard let existing = store.all().first(where: { $0.id == session.id }) else {
             store.add(session)
@@ -149,13 +183,17 @@ public final class WorkdayTracker {
     // MARK: Helpers
 
     /// Enforces the invariants the live clock path maintains, so edits made in
-    /// the log can't persist an impossible session: a closed session never holds
-    /// a running break.
+    /// the log can't persist an impossible session: a day never ends before it
+    /// starts, and a closed session never holds a running break.
     private func normalized(_ session: ClockSession) -> ClockSession {
         guard let out = session.clockedOutAt else { return session }
         var session = session
+        // The log's date pickers are unbounded, so a clock-out can be dragged
+        // behind the clock-in; a day of no length beats one of negative length.
+        let end = max(out, session.clockedInAt)
+        session.clockedOutAt = end
         for index in session.breaks.indices where session.breaks[index].isActive {
-            session.breaks[index].endedAt = out
+            session.breaks[index].endedAt = end
         }
         return session
     }

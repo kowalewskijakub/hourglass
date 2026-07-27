@@ -170,3 +170,21 @@ alter table public.sessions add primary key (user_id, id);
 
 alter table public.clock_sessions drop constraint if exists clock_sessions_pkey;
 alter table public.clock_sessions add primary key (user_id, id);
+
+-- ---------------------------------------------------------------------------
+-- Tombstones (applied 2026-07-27)
+-- A row that is simply DELETEd leaves the other devices no way to learn it is
+-- gone. Realtime reports a delete as a bare primary key with no row behind it,
+-- and a device that was asleep or offline at the time is told nothing at all —
+-- it still holds its copy, and uploads it again on the next connect, which is
+-- how a deleted session comes back.
+--
+-- Keeping the row and stamping `deleted_at` turns a deletion into an ordinary
+-- update: Realtime carries it, a reconnecting device reads it in the initial
+-- fetch, and both can weigh it against their own copy by `updated_at` exactly
+-- like any other change.
+--
+-- Nullable, so every row that already exists reads as "not deleted".
+-- ---------------------------------------------------------------------------
+alter table public.sessions       add column if not exists deleted_at timestamptz;
+alter table public.clock_sessions add column if not exists deleted_at timestamptz;

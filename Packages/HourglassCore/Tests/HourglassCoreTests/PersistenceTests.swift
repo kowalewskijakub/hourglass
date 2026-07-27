@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Observation
 @testable import HourglassCore
 
 @MainActor
@@ -48,6 +49,94 @@ import Foundation
 
         reloaded.delete(id: session.id)
         #expect(FileHistoryStore(fileURL: url).all().isEmpty)
+
+        reloaded.add(session)
+        reloaded.clear()
+        #expect(FileHistoryStore(fileURL: url).all().isEmpty)
+    }
+
+    /// The same generic store backs both seams, so workdays get the same
+    /// round-trip coverage history has.
+    @Test func workdaysPersistToFileAndReload() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hg-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let store = FileWorkdayStore(fileURL: url)
+        #expect(store.all().isEmpty)
+
+        let start = Date()
+        var session = ClockSession(clockedInAt: start)
+        store.add(session)
+
+        let reloaded = FileWorkdayStore(fileURL: url)
+        #expect(reloaded.all().count == 1)
+        #expect(reloaded.all().first?.isActive == true)
+
+        session.clockedOutAt = start.addingTimeInterval(3600)
+        session.breaks = [WorkBreak(startedAt: start, endedAt: start.addingTimeInterval(600))]
+        reloaded.update(session)
+
+        let afterUpdate = FileWorkdayStore(fileURL: url).all().first
+        #expect(afterUpdate?.isActive == false)
+        #expect(afterUpdate?.netDuration() == 3000)
+
+        reloaded.delete(id: session.id)
+        #expect(FileWorkdayStore(fileURL: url).all().isEmpty)
+
+        reloaded.add(session)
+        reloaded.clear()
+        #expect(FileWorkdayStore(fileURL: url).all().isEmpty)
+    }
+
+    /// Pins the on-disk names: the two seams share one generic store, and must
+    /// keep reading the files a user already has.
+    @Test func eachStoreKeepsItsOwnFileUnderApplicationSupport() {
+        let history = FileHistoryStore.defaultURL()
+        let workdays = FileWorkdayStore.defaultURL()
+
+        #expect(history.lastPathComponent == "history.json")
+        #expect(workdays.lastPathComponent == "workdays.json")
+        #expect(history.deletingLastPathComponent() == workdays.deletingLastPathComponent())
+        #expect(history.deletingLastPathComponent().lastPathComponent == "Hourglass")
+    }
+
+    /// Observation is what refreshes the statistics views when a session lands,
+    /// so it has to survive the store being generic.
+    @Test func writingToAStoreNotifiesObservers() {
+        nonisolated(unsafe) var historyChanged = false
+        nonisolated(unsafe) var workdaysChanged = false
+
+        let history = InMemoryHistoryStore()
+        let workdays = InMemoryWorkdayStore()
+
+        withObservationTracking { _ = history.all() } onChange: { historyChanged = true }
+        withObservationTracking { _ = workdays.all() } onChange: { workdaysChanged = true }
+
+        history.add(FocusSession(kind: .focus, plannedDuration: 1500, startedAt: Date()))
+        workdays.add(ClockSession(clockedInAt: Date()))
+
+        #expect(historyChanged)
+        #expect(workdaysChanged)
+    }
+
+    /// Update/delete/clear behave the same in the fakes both suites rely on.
+    @Test func inMemoryStoresEditInPlaceForBothRecordTypes() {
+        var focus = FocusSession(kind: .focus, plannedDuration: 1500, startedAt: Date())
+        let history = InMemoryHistoryStore(sessions: [focus])
+        focus.completed = true
+        history.update(focus)
+        #expect(history.all().first?.completed == true)
+        history.delete(id: focus.id)
+        #expect(history.all().isEmpty)
+
+        var clock = ClockSession(clockedInAt: Date())
+        let workdays = InMemoryWorkdayStore(sessions: [clock])
+        clock.clockedOutAt = Date()
+        workdays.update(clock)
+        #expect(workdays.all().first?.isActive == false)
+        workdays.clear()
+        #expect(workdays.all().isEmpty)
     }
 
     @Test func settingsCodableRoundTrip() throws {

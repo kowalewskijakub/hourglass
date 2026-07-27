@@ -22,6 +22,15 @@ struct StatisticsView: View {
         return first...last.addingTimeInterval(86_400)
     }
 
+    /// A normal 5:00–23:00 day, stretched only as far as the data needs — an
+    /// early start, or a stretch that ran to midnight, would otherwise be
+    /// drawn off the plot.
+    private var hourDomain: ClosedRange<Double> {
+        let starts = clockSpans.compactMap(\.startHour)
+        let ends = clockSpans.compactMap(\.endHour)
+        return min(5, starts.min() ?? 5)...max(23, ends.max() ?? 23)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
@@ -115,7 +124,7 @@ struct StatisticsView: View {
                 .font(.headline)
             Chart {
                 ForEach(clockSpans) { span in
-                    if let start = hour(span.firstClockIn), let end = endHour(of: span) {
+                    if let start = span.startHour, let end = span.endHour {
                         BarMark(
                             x: .value("Day", span.date, unit: .day),
                             yStart: .value("From", start),
@@ -124,9 +133,13 @@ struct StatisticsView: View {
                         .foregroundStyle(Color.blue.gradient)
                         .cornerRadius(4)
                         .annotation(position: .top, spacing: 3) {
-                            Text("\(span.clockInCount)×")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            // A day carried over from the night before has a
+                            // bar but no clock-in of its own to count.
+                            if span.clockInCount > 0 {
+                                Text("\(span.clockInCount)×")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -146,30 +159,13 @@ struct StatisticsView: View {
                     AxisGridLine()
                 }
             }
-            .chartYScale(domain: 5...23)
+            .chartYScale(domain: hourDomain)
             .chartXScale(domain: dayDomain)
             .frame(height: 180)
 
-            Text("Bar spans first clock-in to last clock-out; the number is how many times you clocked in.")
+            Text("Bar spans first clock-in to last clock-out — or to now, while you're still on the clock; the number is how many times you clocked in.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    /// Where the day's bar ends. A day you're still clocked into has no
-    /// clock-out yet, so it runs to the current time rather than vanishing.
-    private func endHour(of span: StatisticsCalculator.DailyClockSpan) -> Double? {
-        // Still on the clock: the bar runs to now, which is also later than any
-        // earlier clock-out today.
-        if Calendar.current.isDateInToday(span.date), model.workday.isClockedIn {
-            return hour(Date())
-        }
-        return hour(span.lastClockOut)
-    }
-
-    private func hour(_ instant: Date?) -> Double? {
-        guard let instant else { return nil }
-        let calendar = Calendar.current
-        return instant.timeIntervalSince(calendar.startOfDay(for: instant)) / 3600
     }
 }

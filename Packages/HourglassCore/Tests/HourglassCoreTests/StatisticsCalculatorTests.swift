@@ -83,6 +83,83 @@ import Foundation
         #expect(march8?.focusMinutes == 25)
     }
 
+    // MARK: Day shape (clock spans)
+
+    private func clock(_ inAt: Date, out outAt: Date? = nil) -> ClockSession {
+        ClockSession(clockedInAt: inAt, clockedOutAt: outAt)
+    }
+
+    private func span(
+        _ spans: [StatisticsCalculator.DailyClockSpan],
+        on day: Date
+    ) -> StatisticsCalculator.DailyClockSpan? {
+        spans.first { utc.isDate($0.date, inSameDayAs: day) }
+    }
+
+    @Test func clockSpanForADayStillOnTheClockRunsToNow() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 14).addingTimeInterval(1800) // 14:30
+        let sessions = [clock(date(2026, 3, 10, 9))] // never clocked out
+
+        let today = span(calc.dailyClockSpans(in: sessions, lastDays: 7, endingOn: now), on: now)
+        #expect(today?.start == date(2026, 3, 10, 9))
+        #expect(today?.end == now)
+        #expect(today?.startHour == 9)
+        #expect(today?.endHour == 14.5)
+        #expect(today?.clockInCount == 1)
+    }
+
+    @Test func clockSpanRunningPastMidnightShapesBothDays() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 3)
+        let sessions = [clock(date(2026, 3, 9, 22))] // opened last night, still open
+        let spans = calc.dailyClockSpans(in: sessions, lastDays: 7, endingOn: now)
+
+        let lastNight = span(spans, on: date(2026, 3, 9))
+        #expect(lastNight?.startHour == 22)
+        #expect(lastNight?.endHour == 24) // clipped at midnight rather than left open
+        #expect(lastNight?.clockInCount == 1)
+
+        let today = span(spans, on: now)
+        #expect(today?.start == date(2026, 3, 10, 0))
+        #expect(today?.startHour == 0)
+        #expect(today?.endHour == 3)
+        #expect(today?.clockInCount == 0) // carried over instead of starting here
+    }
+
+    @Test func clockSpanForAClosedDayEndsAtTheLastClockOut() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 20)
+        let lastOut = date(2026, 3, 10, 17).addingTimeInterval(1800) // 17:30
+        let sessions = [
+            clock(date(2026, 3, 10, 9), out: date(2026, 3, 10, 12)),
+            clock(date(2026, 3, 10, 13), out: lastOut),
+        ]
+
+        let today = span(calc.dailyClockSpans(in: sessions, lastDays: 7, endingOn: now), on: now)
+        #expect(today?.end == lastOut) // not `now`: the day is done
+        #expect(today?.startHour == 9)
+        #expect(today?.endHour == 17.5)
+        #expect(today?.clockInCount == 2)
+    }
+
+    @Test func clockSpansCoverTheRangeAndLeaveDaysOffTheClockEmpty() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 18)
+        let sessions = [clock(date(2026, 3, 8, 9), out: date(2026, 3, 8, 17))]
+        let spans = calc.dailyClockSpans(in: sessions, lastDays: 7, endingOn: now)
+
+        #expect(spans.count == 7)
+        #expect(spans.first?.date == utc.startOfDay(for: date(2026, 3, 4)))
+        #expect(span(spans, on: date(2026, 3, 8))?.endHour == 17)
+
+        let idle = span(spans, on: now) // a finished day doesn't bleed forward
+        #expect(idle?.start == nil)
+        #expect(idle?.startHour == nil)
+        #expect(idle?.endHour == nil)
+        #expect(idle?.clockInCount == 0)
+    }
+
     @Test func weeklyTotalRespectsWeekBoundaries() {
         let calc = StatisticsCalculator(calendar: utc)
         // 2026-03-10 is a Tuesday.

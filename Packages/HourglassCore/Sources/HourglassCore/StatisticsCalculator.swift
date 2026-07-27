@@ -165,23 +165,36 @@ public struct StatisticsCalculator: Sendable {
         }
     }
 
-    /// When a day started and ended, and how many times it was clocked into.
+    /// When a day started and ended on the clock, and how many times it was
+    /// clocked into.
+    ///
+    /// Both instants are already resolved against the `now` the span was built
+    /// for, so a chart plots `startHour`/`endHour` as-is. Resolving here rather
+    /// than at draw time is what keeps a still-running day agreeing with the
+    /// worked-time headline instead of each reading the clock separately.
     public struct DailyClockSpan: Sendable, Identifiable, Hashable {
         public let date: Date
-        public let firstClockIn: Date?
-        public let lastClockOut: Date?
+        /// First moment of this day spent on the clock; nil on a day off it.
+        public let start: Date?
+        /// Last moment on the clock — `now` on a day still running, midnight
+        /// when the stretch carries on into the next day.
+        public let end: Date?
+        /// Hours past this day's midnight, ready to use as a chart axis value.
+        /// `endHour` reaches 24 when the day never clocked out.
+        public let startHour: Double?
+        public let endHour: Double?
+        /// How many stretches *began* on this day, so a carried-over stretch
+        /// isn't counted twice; 0 on a day that only inherited one.
         public let clockInCount: Int
         public var id: Date { date }
-
-        /// Hours-past-midnight, handy as a chart axis value.
-        public func hour(of instant: Date?, calendar: Calendar) -> Double? {
-            guard let instant else { return nil }
-            let start = calendar.startOfDay(for: instant)
-            return instant.timeIntervalSince(start) / 3600
-        }
     }
 
-    /// First clock-in and last clock-out per day, oldest first.
+    /// The shape of each of the last `days` days on the clock, oldest first.
+    ///
+    /// Days are filled by overlap, the way `grossTime` does it, so a stretch
+    /// running past midnight shapes both days instead of leaving the second one
+    /// blank. A day still on the clock ends at `now`, which is also later than
+    /// any earlier clock-out that day.
     public func dailyClockSpans(
         in all: [ClockSession],
         lastDays days: Int,
@@ -190,15 +203,33 @@ public struct StatisticsCalculator: Sendable {
         guard days > 0 else { return [] }
         let today = calendar.startOfDay(for: now)
         return (0..<days).reversed().compactMap { offset in
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
-            let onDay = sessions(all, on: day)
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today),
+                  let dayInterval = calendar.dateInterval(of: .day, for: day) else { return nil }
+
+            let clipped = all.compactMap { session -> (start: Date, end: Date)? in
+                let start = max(session.clockedInAt, dayInterval.start)
+                let end = min(session.clockedOutAt ?? now, dayInterval.end)
+                return end > start ? (start, end) : nil
+            }
+            let start = clipped.map(\.start).min()
+            let end = clipped.map(\.end).max()
             return DailyClockSpan(
                 date: day,
-                firstClockIn: onDay.map(\.clockedInAt).min(),
-                lastClockOut: onDay.compactMap(\.clockedOutAt).max(),
-                clockInCount: onDay.count
+                start: start,
+                end: end,
+                startHour: hours(from: dayInterval.start, to: start),
+                endHour: hours(from: dayInterval.start, to: end),
+                clockInCount: clockInCount(in: all, on: day)
             )
         }
+    }
+
+    /// Hours from `dayStart` to `instant`. Measured from the day rather than
+    /// from the instant's own midnight so a stretch clipped at midnight lands
+    /// at hour 24 of the day it belongs to, not hour 0 of the next one.
+    private func hours(from dayStart: Date, to instant: Date?) -> Double? {
+        guard let instant else { return nil }
+        return instant.timeIntervalSince(dayStart) / 3600
     }
 
     // MARK: Daily breakdown (for bar charts)

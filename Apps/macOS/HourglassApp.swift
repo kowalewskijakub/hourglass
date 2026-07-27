@@ -53,9 +53,6 @@ final class MacAppController: NSObject, NSApplicationDelegate {
         }
 
         refreshClockInReminder()
-        model.workday.onClockStateChanged = { [weak self] _ in
-            self?.refreshClockInReminder()
-        }
         activityWatcher = ActivityWatcher(
             isClockedIn: { [weak self] in self?.model.workday.isClockedIn ?? true },
             isEnabled: { [weak self] in self?.model.settings.activityNudgeEnabled ?? false }
@@ -68,7 +65,7 @@ final class MacAppController: NSObject, NSApplicationDelegate {
         }
 
         applyMode()
-        observeSettings()
+        observeModel()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -190,17 +187,24 @@ final class MacAppController: NSObject, NSApplicationDelegate {
         lastAppliedMode = mode
     }
 
-    /// Only touch windows when the mode actually changes, so unrelated settings
-    /// edits (durations, sound, …) have no window side effects.
-    private func observeSettings() {
+    /// Re-applies anything derived from settings or clock state.
+    ///
+    /// Both are tracked as observable state rather than driven off a callback,
+    /// so a clock-in arriving from another device re-applies the reminder too —
+    /// a sync-applied change deliberately skips the tracker's hooks.
+    ///
+    /// Windows are only touched when the mode actually changes, so unrelated
+    /// settings edits (durations, sound, …) have no window side effects.
+    private func observeModel() {
         withObservationTracking {
             _ = model.settings
+            _ = model.workday.isClockedIn
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 if self.model.settings.macAppMode != self.lastAppliedMode { self.applyMode() }
                 self.refreshClockInReminder()
-                self.observeSettings()
+                self.observeModel()
             }
         }
     }

@@ -12,6 +12,9 @@ public struct FocusSession: Codable, Sendable, Identifiable, Hashable {
     public var completed: Bool
     /// Optional label describing what was worked on (focus sessions only).
     public var taskLabel: String?
+    /// When this session last changed. Optional so files written before this
+    /// existed still decode; treated as "oldest" when absent.
+    public var updatedAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -20,7 +23,8 @@ public struct FocusSession: Codable, Sendable, Identifiable, Hashable {
         startedAt: Date,
         endedAt: Date? = nil,
         completed: Bool = false,
-        taskLabel: String? = nil
+        taskLabel: String? = nil,
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -29,6 +33,7 @@ public struct FocusSession: Codable, Sendable, Identifiable, Hashable {
         self.endedAt = endedAt
         self.completed = completed
         self.taskLabel = taskLabel
+        self.updatedAt = updatedAt
     }
 
     /// Wall-clock time actually elapsed between start and end.

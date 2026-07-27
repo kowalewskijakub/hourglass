@@ -17,76 +17,42 @@ struct HourglassLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TimerActivityAttributes.self) { context in
             LockScreenLiveActivityView(state: context.state)
-                .activityBackgroundTint(tint(context.state).opacity(0.14))
+                .activityBackgroundTint(context.state.tint.opacity(0.14))
                 .activitySystemActionForegroundColor(.primary)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(title(context.state), systemImage: symbol(context.state))
+                    Label(context.state.title, systemImage: context.state.symbolName)
                         .font(.caption)
-                        .foregroundStyle(tint(context.state))
+                        .foregroundStyle(context.state.tint)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     clock(context.state)
                         .font(.title2.monospacedDigit())
-                        .foregroundStyle(tint(context.state))
+                        .foregroundStyle(context.state.tint)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if context.state.mode == .timer {
-                        progressBar(context.state).tint(tint(context.state))
+                        progressBar(context.state).tint(context.state.tint)
                     } else {
-                        Text(subtitle(context.state))
+                        Text(context.state.subtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             } compactLeading: {
-                Image(systemName: symbol(context.state))
-                    .foregroundStyle(tint(context.state))
+                Image(systemName: context.state.symbolName)
+                    .foregroundStyle(context.state.tint)
             } compactTrailing: {
                 clock(context.state)
                     .monospacedDigit()
-                    .foregroundStyle(tint(context.state))
+                    .foregroundStyle(context.state.tint)
                     .frame(maxWidth: 46)
             } minimal: {
-                Image(systemName: symbol(context.state))
-                    .foregroundStyle(tint(context.state))
+                Image(systemName: context.state.symbolName)
+                    .foregroundStyle(context.state.tint)
             }
-            .keylineTint(tint(context.state))
-        }
-    }
-
-    // MARK: Per-mode presentation
-
-    private func title(_ state: TimerActivityAttributes.ContentState) -> String {
-        switch state.mode {
-        case .timer: return state.kind.displayName
-        case .clockedIn: return "Clocked in"
-        case .onBreak: return "On break"
-        }
-    }
-
-    private func subtitle(_ state: TimerActivityAttributes.ContentState) -> String {
-        switch state.mode {
-        case .timer: return state.kind.displayName
-        case .clockedIn: return "Working — no timer running"
-        case .onBreak: return "Break in progress"
-        }
-    }
-
-    private func symbol(_ state: TimerActivityAttributes.ContentState) -> String {
-        switch state.mode {
-        case .timer: return state.kind.symbolName
-        case .clockedIn: return "clock.badge.checkmark"
-        case .onBreak: return "cup.and.saucer.fill"
-        }
-    }
-
-    private func tint(_ state: TimerActivityAttributes.ContentState) -> Color {
-        switch state.mode {
-        case .timer: return state.kind.tint
-        case .clockedIn: return .green
-        case .onBreak: return .orange
+            .keylineTint(context.state.tint)
         }
     }
 
@@ -124,24 +90,24 @@ struct LockScreenLiveActivityView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: symbol)
+            Image(systemName: state.symbolName)
                 .font(.title)
-                .foregroundStyle(tint)
+                .foregroundStyle(state.tint)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.headline)
+                Text(state.title).font(.headline)
                 if state.mode == .timer {
                     if state.isRunning {
                         ProgressView(timerInterval: state.timerRange, countsDown: false)
                             .labelsHidden()
-                            .tint(tint)
+                            .tint(state.tint)
                     } else {
                         ProgressView(value: state.pausedFraction, total: 1)
                             .labelsHidden()
-                            .tint(tint)
+                            .tint(state.tint)
                     }
                 } else {
-                    Text(state.mode == .onBreak ? "Break in progress" : "Working")
+                    Text(state.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -164,29 +130,5 @@ struct LockScreenLiveActivityView: View {
             .frame(width: 82, alignment: .trailing)
         }
         .padding()
-    }
-
-    private var title: String {
-        switch state.mode {
-        case .timer: return state.kind.displayName
-        case .clockedIn: return "Clocked in"
-        case .onBreak: return "On break"
-        }
-    }
-
-    private var symbol: String {
-        switch state.mode {
-        case .timer: return state.kind.symbolName
-        case .clockedIn: return "clock.badge.checkmark"
-        case .onBreak: return "cup.and.saucer.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch state.mode {
-        case .timer: return state.kind.tint
-        case .clockedIn: return .green
-        case .onBreak: return .orange
-        }
     }
 }
