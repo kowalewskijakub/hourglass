@@ -186,6 +186,32 @@ import Foundation
         #expect(store.all().count == 1)
     }
 
+    /// Regression: a stale copy arriving from another device must not undo a
+    /// newer local edit — that is what made log edits look like they "didn't
+    /// work" when in fact sync overwrote them.
+    @Test func remoteCopyOnlyWinsWhenItIsNewer() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        let local = tracker.currentSession!
+
+        // A stale copy of the same session, still open, from before our edit.
+        var stale = local
+        stale.clockedOutAt = nil
+        stale.updatedAt = clock.now.addingTimeInterval(-3600)
+
+        clock.jump(by: 60)
+        tracker.clockOut()                       // local edit: now closed
+        tracker.applyRemote(stale)               // stale arrives
+        #expect(store.all().first?.isActive == false) // local edit survives
+
+        // A genuinely newer copy is accepted.
+        var fresher = local
+        fresher.clockedOutAt = nil
+        fresher.updatedAt = clock.now.addingTimeInterval(3600)
+        tracker.applyRemote(fresher)
+        #expect(store.all().first?.isActive == true)
+    }
+
     @Test func activeBreakDurationCountsFromTheBreakStart() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let session = ClockSession(

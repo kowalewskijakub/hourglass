@@ -119,6 +119,21 @@ final class AppModel {
         calculator.dailyStats(in: sessions, lastDays: days, endingOn: now)
     }
 
+    /// Worked vs focused minutes per day, for the stacked bar chart.
+    func dailyWorkStats(lastDays days: Int = 7, now: Date = Date()) -> [StatisticsCalculator.DailyWorkStat] {
+        calculator.dailyWorkStats(
+            clockSessions: workday.sessions(),
+            focusSessions: sessions,
+            lastDays: days,
+            endingOn: now
+        )
+    }
+
+    /// First clock-in / last clock-out per day, for the day-shape chart.
+    func dailyClockSpans(lastDays days: Int = 7, now: Date = Date()) -> [StatisticsCalculator.DailyClockSpan] {
+        calculator.dailyClockSpans(in: workday.sessions(), lastDays: days, endingOn: now)
+    }
+
     // MARK: - Workday statistics
 
     func clockInsToday(now: Date = Date()) -> Int {

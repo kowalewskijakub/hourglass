@@ -131,6 +131,76 @@ public struct StatisticsCalculator: Sendable {
         max(0, grossTime(in: all, on: day, asOf: now) - breakTime(in: all, on: day, asOf: now))
     }
 
+    /// A day's worked time alongside how much of it was spent in Pomodoro focus.
+    public struct DailyWorkStat: Sendable, Identifiable, Hashable {
+        public let date: Date
+        public let workedMinutes: Double
+        public let focusMinutes: Double
+        public var id: Date { date }
+
+        /// Share of the worked time that was focused, 0...1.
+        public var focusShare: Double {
+            guard workedMinutes > 0 else { return 0 }
+            return min(1, focusMinutes / workedMinutes)
+        }
+
+        /// Worked time that wasn't inside a Pomodoro, for stacking on a chart.
+        public var otherMinutes: Double { max(0, workedMinutes - focusMinutes) }
+    }
+
+    /// Worked vs focused time per day, oldest first.
+    public func dailyWorkStats(
+        clockSessions: [ClockSession],
+        focusSessions: [FocusSession],
+        lastDays days: Int,
+        endingOn now: Date
+    ) -> [DailyWorkStat] {
+        guard days > 0 else { return [] }
+        let today = calendar.startOfDay(for: now)
+        return (0..<days).reversed().compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let worked = netWorkedTime(in: clockSessions, on: day, asOf: now) / 60
+            let focused = totalFocusTime(in: focusSessions, on: day) / 60
+            return DailyWorkStat(date: day, workedMinutes: worked, focusMinutes: focused)
+        }
+    }
+
+    /// When a day started and ended, and how many times it was clocked into.
+    public struct DailyClockSpan: Sendable, Identifiable, Hashable {
+        public let date: Date
+        public let firstClockIn: Date?
+        public let lastClockOut: Date?
+        public let clockInCount: Int
+        public var id: Date { date }
+
+        /// Hours-past-midnight, handy as a chart axis value.
+        public func hour(of instant: Date?, calendar: Calendar) -> Double? {
+            guard let instant else { return nil }
+            let start = calendar.startOfDay(for: instant)
+            return instant.timeIntervalSince(start) / 3600
+        }
+    }
+
+    /// First clock-in and last clock-out per day, oldest first.
+    public func dailyClockSpans(
+        in all: [ClockSession],
+        lastDays days: Int,
+        endingOn now: Date
+    ) -> [DailyClockSpan] {
+        guard days > 0 else { return [] }
+        let today = calendar.startOfDay(for: now)
+        return (0..<days).reversed().compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let onDay = sessions(all, on: day)
+            return DailyClockSpan(
+                date: day,
+                firstClockIn: onDay.map(\.clockedInAt).min(),
+                lastClockOut: onDay.compactMap(\.clockedOutAt).max(),
+                clockInCount: onDay.count
+            )
+        }
+    }
+
     // MARK: Daily breakdown (for bar charts)
 
     /// One entry per day for the last `days` days, oldest first, ending on `now`.

@@ -27,7 +27,6 @@ struct LogView: View {
                             // workday, indented under it.
                             ForEach(group.children) { item in
                                 row(for: item)
-                                    .padding(.leading, group.clockSession == nil ? 0 : 14)
                             }
                         } header: {
                             if let clockSession = group.clockSession {
@@ -231,20 +230,33 @@ private struct SessionEditView: View {
     }
 
     var body: some View {
-        EditSheet(title: isNew ? "Add Session" : "Edit Session") {
-            Picker("Type", selection: $draft.kind) {
-                ForEach(SessionKind.allCases, id: \.self) { kind in
-                    Text(kind.displayName).tag(kind)
+        NavigationStack {
+            Form {
+                Picker("Type", selection: $draft.kind) {
+                    ForEach(SessionKind.allCases, id: \.self) { kind in
+                        Text(kind.displayName).tag(kind)
+                    }
+                }
+                DatePicker("Started", selection: $draft.startedAt)
+                Stepper("Duration: \(minutes) min", value: minutesBinding, in: 1...240)
+            }
+            .formStyle(.grouped)
+            .navigationTitle(isNew ? "Add Session" : "Edit Session")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        var saved = draft
+                        saved.endedAt = draft.startedAt.addingTimeInterval(draft.plannedDuration)
+                        onSave(saved)
+                        dismiss()
+                    }
                 }
             }
-            DatePicker("Started", selection: $draft.startedAt)
-            Stepper("Duration: \(minutes) min", value: minutesBinding, in: 1...240)
-        } onSave: {
-            var saved = draft
-            saved.endedAt = draft.startedAt.addingTimeInterval(draft.plannedDuration)
-            onSave(saved)
-            dismiss()
-        } onCancel: { dismiss() }
+        }
+        .frame(minWidth: 380, minHeight: 300)
     }
 
     private var minutes: Int { Int((draft.plannedDuration / 60).rounded()) }
@@ -272,23 +284,36 @@ private struct ClockEditView: View {
     }
 
     var body: some View {
-        EditSheet(title: "Edit Workday") {
-            DatePicker("Clocked in", selection: $draft.clockedInAt)
-            Toggle("Still clocked in", isOn: $stillClockedIn)
-            if !stillClockedIn {
-                DatePicker("Clocked out", selection: $clockOut)
+        NavigationStack {
+            Form {
+                DatePicker("Clocked in", selection: $draft.clockedInAt)
+                Toggle("Still clocked in", isOn: $stillClockedIn)
+                if !stillClockedIn {
+                    DatePicker("Clocked out", selection: $clockOut)
+                }
+                if !draft.breaks.isEmpty {
+                    Text("\(draft.breaks.count) break(s) · \(TimeFormatting.humanDuration(draft.breakDuration()))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            if !draft.breaks.isEmpty {
-                Text("\(draft.breaks.count) break(s) · \(TimeFormatting.humanDuration(draft.breakDuration()))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .formStyle(.grouped)
+            .navigationTitle("Edit Workday")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        var saved = draft
+                        saved.clockedOutAt = stillClockedIn ? nil : clockOut
+                        onSave(saved)
+                        dismiss()
+                    }
+                }
             }
-        } onSave: {
-            var saved = draft
-            saved.clockedOutAt = stillClockedIn ? nil : clockOut
-            onSave(saved)
-            dismiss()
-        } onCancel: { dismiss() }
+        }
+        .frame(minWidth: 380, minHeight: 300)
     }
 }
 
@@ -308,42 +333,30 @@ private struct BreakEditView: View {
     }
 
     var body: some View {
-        EditSheet(title: "Edit Break") {
-            DatePicker("Started", selection: $draft.startedAt)
-            Toggle("Still on break", isOn: $stillRunning)
-            if !stillRunning {
-                DatePicker("Ended", selection: $endedAt)
-            }
-        } onSave: {
-            var saved = draft
-            saved.endedAt = stillRunning ? nil : endedAt
-            onSave(saved)
-            dismiss()
-        } onCancel: { dismiss() }
-    }
-}
-
-/// Shared chrome for the three edit sheets.
-private struct EditSheet<Fields: View>: View {
-    let title: String
-    @ViewBuilder let fields: Fields
-    let onSave: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
         NavigationStack {
-            Form { fields }
-                .formStyle(.grouped)
-                .navigationTitle(title)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel", action: onCancel)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save", action: onSave)
+            Form {
+                DatePicker("Started", selection: $draft.startedAt)
+                Toggle("Still on break", isOn: $stillRunning)
+                if !stillRunning {
+                    DatePicker("Ended", selection: $endedAt)
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Edit Break")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        var saved = draft
+                        saved.endedAt = stillRunning ? nil : endedAt
+                        onSave(saved)
+                        dismiss()
                     }
                 }
+            }
         }
-        .frame(minWidth: 380, minHeight: 320)
+        .frame(minWidth: 380, minHeight: 300)
     }
 }

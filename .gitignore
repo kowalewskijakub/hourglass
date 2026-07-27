@@ -18,3 +18,4 @@ Package.resolved
 
 # Sync credentials (never commit)
 Sync/SyncConfig.swift
+build-device/

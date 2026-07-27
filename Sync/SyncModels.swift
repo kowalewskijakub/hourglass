@@ -67,7 +67,9 @@ struct ClockSessionRow: Codable, Equatable {
         clocked_in_at = session.clockedInAt
         clocked_out_at = session.clockedOutAt
         breaks = session.breaks
-        updated_at = Date()
+        // Carry the local change time so the other device can tell whose copy
+        // is newer, rather than blindly taking whatever arrived last.
+        updated_at = session.updatedAt ?? Date()
     }
 
     var clockSession: ClockSession {
@@ -75,7 +77,8 @@ struct ClockSessionRow: Codable, Equatable {
             id: id,
             clockedInAt: clocked_in_at,
             clockedOutAt: clocked_out_at,
-            breaks: breaks
+            breaks: breaks,
+            updatedAt: updated_at
         )
     }
 }

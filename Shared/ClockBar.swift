@@ -15,19 +15,16 @@ struct ClockBar: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 10) {
-                Button(action: workday.toggleClock) {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 7, height: 7)
-                        Text(statusText(asOf: context.date))
-                            .font(compact ? .caption : .callout)
-                            .monospacedDigit()
-                    }
-                    .contentShape(Rectangle())
+                // Status is a read-out, not a control — clicking it did nothing
+                // useful and made accidental clock-outs easy.
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(statusText(asOf: context.date))
+                        .font(compact ? .caption : .callout)
+                        .monospacedDigit()
                 }
-                .buttonStyle(.plain)
-                .help(workday.isClockedIn ? "Clock out" : "Clock in")
 
                 if workday.isClockedIn {
                     Button(action: workday.toggleBreak) {
@@ -38,6 +35,24 @@ struct ClockBar: View {
                     }
                     .buttonStyle(.plain)
                     .help(workday.isOnBreak ? "End break" : "Start a break")
+
+                    Button(action: workday.clockOut) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .font(compact ? .callout : .body)
+                            .foregroundStyle(.secondary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clock out")
+                } else {
+                    Button(action: { workday.clockIn() }) {
+                        Image(systemName: "play.circle")
+                            .font(compact ? .callout : .body)
+                            .foregroundStyle(.secondary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clock in")
                 }
             }
         }

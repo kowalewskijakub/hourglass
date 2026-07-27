@@ -43,11 +43,14 @@ struct TimerFaceView: View {
             VStack(alignment: .leading, spacing: 10) {
                 controls
 
-                CycleDots(
-                    completedInCycle: engine.focusesCompletedInCycle,
-                    total: sessionsUntilLongBreak,
-                    tint: engine.kind.tint
-                )
+                HStack(spacing: 10) {
+                    CycleDots(
+                        completedInCycle: engine.focusesCompletedInCycle,
+                        total: sessionsUntilLongBreak,
+                        tint: engine.kind.tint
+                    )
+                    resetButton
+                }
             }
             Spacer(minLength: 0)
         }

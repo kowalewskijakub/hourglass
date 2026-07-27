@@ -61,8 +61,6 @@ struct SyncSettingsSection: View {
             }
         } header: {
             Text("Sync")
-        } footer: {
-            Text("Keeps the timer, log and settings in step across your devices. No account or password — pair a device with a one-time code.")
         }
     }
 

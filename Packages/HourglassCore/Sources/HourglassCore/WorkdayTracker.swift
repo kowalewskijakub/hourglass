@@ -54,7 +54,7 @@ public final class WorkdayTracker {
     public func clockIn() -> ClockSession? {
         closeStaleSessions()
         guard !isClockedIn else { return currentSession }
-        let session = ClockSession(clockedInAt: clock.now)
+        let session = ClockSession(clockedInAt: clock.now, updatedAt: clock.now)
         store.add(session)
         onSessionChanged?(session)
         onClockStateChanged?(true)
@@ -110,7 +110,8 @@ public final class WorkdayTracker {
 
     public func update(_ session: ClockSession) { persist(normalized(session)) }
     public func add(_ session: ClockSession) {
-        let session = normalized(session)
+        var session = normalized(session)
+        session.updatedAt = clock.now
         store.add(session)
         onSessionChanged?(session)
     }
@@ -120,9 +121,17 @@ public final class WorkdayTracker {
     }
 
     /// Applies a session mirrored from another device, without echoing it back.
+    /// Adopts a session mirrored from another device, unless what we hold is
+    /// newer — otherwise a stale copy would silently undo a local edit.
     public func applyRemote(_ session: ClockSession) {
-        let isKnown = store.all().contains { $0.id == session.id }
-        if isKnown { store.update(session) } else { store.add(session) }
+        guard let existing = store.all().first(where: { $0.id == session.id }) else {
+            store.add(session)
+            return
+        }
+        let mine = existing.updatedAt ?? .distantPast
+        let theirs = session.updatedAt ?? .distantPast
+        guard theirs >= mine else { return }
+        store.update(session)
     }
 
     public func deleteLocally(id: ClockSession.ID) { store.delete(id: id) }
@@ -131,6 +140,8 @@ public final class WorkdayTracker {
 
     /// Single write path, so every mutation notifies the sync layer.
     private func persist(_ session: ClockSession) {
+        var session = session
+        session.updatedAt = clock.now
         store.update(session)
         onSessionChanged?(session)
     }

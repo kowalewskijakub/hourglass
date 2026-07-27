@@ -27,17 +27,22 @@ public struct ClockSession: Codable, Sendable, Identifiable, Hashable {
     public var clockedInAt: Date
     public var clockedOutAt: Date?
     public var breaks: [WorkBreak]
+    /// When this session last changed. Optional so files written before this
+    /// existed still decode; treated as "oldest" when absent.
+    public var updatedAt: Date?
 
     public init(
         id: UUID = UUID(),
         clockedInAt: Date,
         clockedOutAt: Date? = nil,
-        breaks: [WorkBreak] = []
+        breaks: [WorkBreak] = [],
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.clockedInAt = clockedInAt
         self.clockedOutAt = clockedOutAt
         self.breaks = breaks
+        self.updatedAt = updatedAt
     }
 
     public var isActive: Bool { clockedOutAt == nil }
