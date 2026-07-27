@@ -159,6 +159,33 @@ import Foundation
         #expect(calc.netWorkedTime(in: [session], on: dayTwo) == 2 * 3600)
     }
 
+    /// Ending the break is what stops break time accruing while you work — the
+    /// app calls this whenever a Pomodoro starts, including when idle.
+    @Test func endingABreakStopsItAccruingAndIsSafeWhenThereIsNone() {
+        let (tracker, store, clock) = makeTracker()
+        tracker.clockIn()
+        tracker.startBreak()
+        clock.jump(by: 300)
+        tracker.endBreak()
+
+        // Break is closed, so further time counts as worked, not break.
+        clock.jump(by: 600)
+        let session = store.all().first
+        #expect(session?.isOnBreak == false)
+        #expect(session?.breakDuration(asOf: clock.now) == 300)
+        // 900s clocked in, 300s of it on a break -> 600s actually worked.
+        #expect(session?.netDuration(asOf: clock.now) == 600)
+
+        // Calling it again — as the app does on every start — changes nothing.
+        tracker.endBreak()
+        #expect(store.all().first?.breakDuration(asOf: clock.now) == 300)
+
+        // And it's harmless when clocked out entirely.
+        tracker.clockOut()
+        tracker.endBreak()
+        #expect(store.all().count == 1)
+    }
+
     @Test func activeBreakDurationCountsFromTheBreakStart() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let session = ClockSession(

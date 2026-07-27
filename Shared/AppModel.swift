@@ -63,6 +63,11 @@ final class AppModel {
             guard let self else { return }
             // Starting a focus session implies you're working: clock in.
             if kind == .focus { workday.clockIn() }
+            // Starting any timer means you're back at it, so close a running
+            // coffee break — leaving it open would keep charging break time
+            // against the session you're actually working through. No-op when
+            // there isn't one.
+            workday.endBreak()
             sync?.pushLiveState()
             onSessionStarted?(kind, secondsRemaining)
         }
