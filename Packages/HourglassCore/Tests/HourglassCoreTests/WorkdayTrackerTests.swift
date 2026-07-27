@@ -159,6 +159,35 @@ import Foundation
         #expect(calc.netWorkedTime(in: [session], on: dayTwo) == 2 * 3600)
     }
 
+    @Test func activeBreakDurationCountsFromTheBreakStart() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let session = ClockSession(
+            clockedInAt: start,
+            breaks: [WorkBreak(startedAt: start.addingTimeInterval(1800))] // break at +30m
+        )
+        // 7 minutes into the break.
+        #expect(session.activeBreakDuration(asOf: start.addingTimeInterval(1800 + 420)) == 420)
+        // No running break -> zero.
+        let noBreak = ClockSession(clockedInAt: start)
+        #expect(noBreak.activeBreakDuration(asOf: start.addingTimeInterval(600)) == 0)
+    }
+
+    @Test func timeSinceLastBreakFallsBackToClockIn() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // No break yet: measured from clock-in.
+        let fresh = ClockSession(clockedInAt: start)
+        #expect(fresh.timeSinceLastBreak(asOf: start.addingTimeInterval(900)) == 900)
+
+        // After a break: measured from when that break ended.
+        let afterBreak = ClockSession(
+            clockedInAt: start,
+            breaks: [WorkBreak(startedAt: start.addingTimeInterval(600),
+                               endedAt: start.addingTimeInterval(900))]
+        )
+        #expect(afterBreak.timeSinceLastBreak(asOf: start.addingTimeInterval(1500)) == 600)
+    }
+
     @Test func statisticsCountClockInsAndNetTime() {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!

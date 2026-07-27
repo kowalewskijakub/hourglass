@@ -64,4 +64,18 @@ public struct ClockSession: Codable, Sendable, Identifiable, Hashable {
     public func netDuration(asOf now: Date = Date()) -> TimeInterval {
         max(0, grossDuration(asOf: now) - breakDuration(asOf: now))
     }
+
+    /// How long the running break has lasted so far; 0 when not on a break.
+    public func activeBreakDuration(asOf now: Date = Date()) -> TimeInterval {
+        activeBreak?.duration(asOf: min(now, clockedOutAt ?? now)) ?? 0
+    }
+
+    /// Time at work since the last break ended — or since clocking in, when
+    /// there hasn't been a break yet.
+    public func timeSinceLastBreak(asOf now: Date = Date()) -> TimeInterval {
+        let end = min(now, clockedOutAt ?? now)
+        let lastBreakEnd = breaks.compactMap(\.endedAt).max()
+        let reference = max(lastBreakEnd ?? clockedInAt, clockedInAt)
+        return max(0, end.timeIntervalSince(reference))
+    }
 }
