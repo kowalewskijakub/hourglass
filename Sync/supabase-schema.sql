@@ -156,3 +156,17 @@ create policy "own clock_sessions" on public.clock_sessions
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 alter publication supabase_realtime add table public.clock_sessions;
+
+-- ---------------------------------------------------------------------------
+-- Per-user row keys (applied 2026-07-27)
+-- Session and clock ids are generated on-device and shared across devices, so
+-- two accounts can hold the same id. With `id` alone as the primary key, one
+-- account's row blocks the other's write: the upsert becomes an UPDATE and RLS
+-- refuses it. Keying by (user_id, id) gives each account its own copy.
+-- Clients must upsert with on_conflict=user_id,id.
+-- ---------------------------------------------------------------------------
+alter table public.sessions drop constraint if exists sessions_pkey;
+alter table public.sessions add primary key (user_id, id);
+
+alter table public.clock_sessions drop constraint if exists clock_sessions_pkey;
+alter table public.clock_sessions add primary key (user_id, id);

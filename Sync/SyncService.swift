@@ -196,14 +196,14 @@ final class SyncService {
             await write(
                 table: "clock_sessions",
                 values: ClockSessionRow(session: session, userID: userID),
-                onConflict: "id"
+                onConflict: "user_id,id"
             )
         }
         for session in model.historyStore.all() where session.completed {
             await write(
                 table: "sessions",
                 values: SessionRow(session: session, userID: userID),
-                onConflict: "id"
+                onConflict: "user_id,id"
             )
         }
     }
@@ -300,7 +300,7 @@ final class SyncService {
         guard !isApplyingRemote, isSignedIn,
               let userID = client.auth.currentUser?.id.uuidString else { return }
         let row = SessionRow(session: session, userID: userID)
-        Task { await write(table: "sessions", values: row, onConflict: "id") }
+        Task { await write(table: "sessions", values: row, onConflict: "user_id,id") }
     }
 
     /// Mirrors a clocked-in stretch (and its breaks) to the other devices.
@@ -308,7 +308,7 @@ final class SyncService {
         guard !isApplyingRemote, isSignedIn,
               let userID = client.auth.currentUser?.id.uuidString else { return }
         let row = ClockSessionRow(session: session, userID: userID)
-        Task { await write(table: "clock_sessions", values: row, onConflict: "id") }
+        Task { await write(table: "clock_sessions", values: row, onConflict: "user_id,id") }
     }
 
     func deleteClockSession(id: ClockSession.ID) {
