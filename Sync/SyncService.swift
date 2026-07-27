@@ -131,6 +131,14 @@ final class SyncService {
         await startSyncing()
     }
 
+    /// Re-reads everything from the server. Realtime can miss events while a
+    /// device is asleep or backgrounded, so reconcile whenever we come forward
+    /// rather than trusting the stream alone.
+    func refresh() async {
+        guard isSignedIn else { return }
+        await pullAll()
+    }
+
     /// Clears a pairing code that has run out, so the UI stops offering it.
     func discardExpiredPairingCode() {
         guard case .syncing(let pairing) = state, let pairing, pairing.isExpired else { return }
@@ -328,11 +336,44 @@ final class SyncService {
 
     // MARK: - Helpers
 
+    /// Decoder for Realtime payloads.
+    ///
+    /// Supabase does *not* emit plain `.iso8601`: JSONB values arrive as
+    /// `2026-07-27T10:06:42.144` — fractional seconds, no zone — while
+    /// `timestamptz` columns carry an offset. `.iso8601` rejects both, which
+    /// silently dropped every realtime update, so accept each shape.
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            guard let date = SyncService.parseDate(string) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Unrecognised date format: \(string)"
+                )
+            }
+            return date
+        }
         return decoder
     }()
+
+    static func parseDate(_ string: String) -> Date? {
+        // Zone-less, as written into JSONB by the SDK's encoder.
+        let zoneless = Date.ISO8601FormatStyle().year().month().day()
+            .dateTimeSeparator(.standard)
+        if let date = try? Date(string, strategy: zoneless.time(includingFractionalSeconds: true)) {
+            return date
+        }
+        if let date = try? Date(string, strategy: zoneless.time(includingFractionalSeconds: false)) {
+            return date
+        }
+        // timestamptz columns, which do carry an offset.
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFractional.date(from: string) { return date }
+        return ISO8601DateFormatter().date(from: string)
+    }
 
     /// Pulls the new row out of an insert/update change (deletes carry no record).
     private static func record<T: Decodable>(from change: AnyAction) -> T? {

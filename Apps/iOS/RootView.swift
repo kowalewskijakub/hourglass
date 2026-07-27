@@ -48,7 +48,10 @@ struct TimerScreen: View {
         .background(model.engine.kind.tint.opacity(0.06).ignoresSafeArea())
         .keepAwake(model.engine.isRunning)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { model.engine.refresh() }
+            guard phase == .active else { return }
+            model.engine.refresh()
+            // Realtime can miss events while backgrounded; reconcile on return.
+            Task { await model.sync?.refresh() }
         }
     }
 }

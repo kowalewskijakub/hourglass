@@ -41,6 +41,7 @@ final class MacAppController: NSObject, NSApplicationDelegate {
         sync = SyncService(model: model)
         model.sync = sync
         Task { await sync.restore() }
+        observeWake()
 
         model.onSessionCompleted = { [weak self] session in
             guard let self else { return }
@@ -71,6 +72,26 @@ final class MacAppController: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        reconcileSync()
+    }
+
+    /// Realtime can miss events while the Mac sleeps, so re-read on wake.
+    private func observeWake() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reconcileSync() }
+        }
+    }
+
+    private func reconcileSync() {
+        guard let sync else { return }
+        Task { await sync.refresh() }
+    }
 
     /// In window mode, reopen the timer window if the user closed the last one.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
