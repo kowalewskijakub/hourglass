@@ -90,6 +90,11 @@ targets:
         CFBundleVersion: "1"
         CFBundleName: Hourglass
         NSSupportsLiveActivities: true
+        # Opportunistic top-up while backgrounded (system-scheduled, best effort).
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.kowalewskijakub.hourglass.refresh
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

@@ -18,6 +18,14 @@ struct HourglassApp: App {
         _model = State(initialValue: model)
         _sync = State(initialValue: sync)
         UNUserNotificationCenter.current().delegate = notificationDelegate
+
+        // Must be registered before launch finishes.
+        let activity = LiveActivityController()
+        _liveActivity = State(initialValue: activity)
+        BackgroundRefresh.register {
+            await sync.refresh()
+            await activity.sync(engine: model.engine, workday: model.workday)
+        }
     }
 
     var body: some Scene {
@@ -36,29 +44,39 @@ struct HourglassApp: App {
 
         // Attach to AppModel's forwarding hooks (it owns the engine callbacks so
         // shared behaviour like auto clock-in always runs).
-        model.onSessionStarted = { [model, scheduler, liveActivity] kind, secondsRemaining in
+        model.onSessionStarted = { [model, scheduler] kind, secondsRemaining in
             if model.settings.notificationsEnabled {
                 scheduler.schedule(after: secondsRemaining, kind: kind, playSound: model.settings.soundEnabled)
             }
-            let planned = model.engine.plannedDuration
-            Task { @MainActor in await liveActivity.startOrUpdate(kind: kind, secondsRemaining: secondsRemaining, plannedDuration: planned) }
+            refreshLiveActivity()
         }
 
-        model.onSessionInterrupted = { [scheduler, liveActivity] ended in
+        model.onSessionInterrupted = { [scheduler] _ in
             scheduler.cancel()
-            Task { @MainActor in
-                if ended { await liveActivity.end() } else { await liveActivity.pause() }
-            }
+            refreshLiveActivity()
         }
 
-        model.onSessionCompleted = { [model, liveActivity] _ in
-            Task { @MainActor in await liveActivity.end() }
+        model.onSessionCompleted = { [model] _ in
+            refreshLiveActivity()
             guard model.settings.soundEnabled else { return }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
 
+        // Clocking in/out and breaks drive the activity too — including changes
+        // arriving from another device.
+        model.onWorkdayChanged = { refreshLiveActivity() }
+
         refreshReminder()
+        refreshLiveActivity()
+        BackgroundRefresh.schedule()
         Task { await sync.restore() }
+    }
+
+    /// Recomputes the Live Activity from the current timer and clock state.
+    private func refreshLiveActivity() {
+        Task { @MainActor in
+            await liveActivity.sync(engine: model.engine, workday: model.workday)
+        }
     }
 
     private func refreshReminder() {

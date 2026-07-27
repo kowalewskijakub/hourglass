@@ -10,52 +10,101 @@ struct HourglassWidgetBundle: WidgetBundle {
     }
 }
 
-/// Live Activity for a running Pomodoro session. The countdown auto-updates from
-/// the device clock; while paused it's frozen with `pauseTime:` and the bar is
-/// swapped to a static value.
+/// Live Activity for the working day: a running Pomodoro counts down, while a
+/// clocked-in stretch or a break counts up. Every number is derived from a date,
+/// so the system keeps it ticking without the app sending updates.
 struct HourglassLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TimerActivityAttributes.self) { context in
             LockScreenLiveActivityView(state: context.state)
-                .activityBackgroundTint(context.state.kind.tint.opacity(0.14))
+                .activityBackgroundTint(tint(context.state).opacity(0.14))
                 .activitySystemActionForegroundColor(.primary)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.state.kind.displayName, systemImage: context.state.kind.symbolName)
+                    Label(title(context.state), systemImage: symbol(context.state))
                         .font(.caption)
-                        .foregroundStyle(context.state.kind.tint)
+                        .foregroundStyle(tint(context.state))
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    timerText(context.state)
+                    clock(context.state)
                         .font(.title2.monospacedDigit())
-                        .foregroundStyle(context.state.kind.tint)
+                        .foregroundStyle(tint(context.state))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    progressBar(context.state)
-                        .tint(context.state.kind.tint)
+                    if context.state.mode == .timer {
+                        progressBar(context.state).tint(tint(context.state))
+                    } else {
+                        Text(subtitle(context.state))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } compactLeading: {
-                Image(systemName: context.state.kind.symbolName)
-                    .foregroundStyle(context.state.kind.tint)
+                Image(systemName: symbol(context.state))
+                    .foregroundStyle(tint(context.state))
             } compactTrailing: {
-                timerText(context.state)
+                clock(context.state)
                     .monospacedDigit()
-                    .foregroundStyle(context.state.kind.tint)
-                    .frame(maxWidth: 44)
+                    .foregroundStyle(tint(context.state))
+                    .frame(maxWidth: 46)
             } minimal: {
-                Image(systemName: context.state.kind.symbolName)
-                    .foregroundStyle(context.state.kind.tint)
+                Image(systemName: symbol(context.state))
+                    .foregroundStyle(tint(context.state))
             }
-            .keylineTint(context.state.kind.tint)
+            .keylineTint(tint(context.state))
         }
     }
 
+    // MARK: Per-mode presentation
+
+    private func title(_ state: TimerActivityAttributes.ContentState) -> String {
+        switch state.mode {
+        case .timer: return state.kind.displayName
+        case .clockedIn: return "Clocked in"
+        case .onBreak: return "On break"
+        }
+    }
+
+    private func subtitle(_ state: TimerActivityAttributes.ContentState) -> String {
+        switch state.mode {
+        case .timer: return state.kind.displayName
+        case .clockedIn: return "Working — no timer running"
+        case .onBreak: return "Break in progress"
+        }
+    }
+
+    private func symbol(_ state: TimerActivityAttributes.ContentState) -> String {
+        switch state.mode {
+        case .timer: return state.kind.symbolName
+        case .clockedIn: return "clock.badge.checkmark"
+        case .onBreak: return "cup.and.saucer.fill"
+        }
+    }
+
+    private func tint(_ state: TimerActivityAttributes.ContentState) -> Color {
+        switch state.mode {
+        case .timer: return state.kind.tint
+        case .clockedIn: return .green
+        case .onBreak: return .orange
+        }
+    }
+
+    /// Counts down for a Pomodoro, up for a clocked-in stretch or break.
     @ViewBuilder
-    private func timerText(_ state: TimerActivityAttributes.ContentState) -> some View {
-        Text(timerInterval: state.timerRange,
-             pauseTime: state.isRunning ? nil : state.pausedAt,
-             countsDown: true)
+    private func clock(_ state: TimerActivityAttributes.ContentState) -> some View {
+        switch state.mode {
+        case .timer:
+            Text(timerInterval: state.timerRange,
+                 pauseTime: state.isRunning ? nil : state.pausedAt,
+                 countsDown: true)
+        case .clockedIn, .onBreak:
+            if let since = state.since {
+                Text(since, style: .timer)
+            } else {
+                Text("--:--")
+            }
+        }
     }
 
     @ViewBuilder
@@ -75,28 +124,69 @@ struct LockScreenLiveActivityView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: state.kind.symbolName)
+            Image(systemName: symbol)
                 .font(.title)
-                .foregroundStyle(state.kind.tint)
+                .foregroundStyle(tint)
+
             VStack(alignment: .leading, spacing: 6) {
-                Text(state.kind.displayName).font(.headline)
-                if state.isRunning {
-                    ProgressView(timerInterval: state.timerRange, countsDown: false)
-                        .labelsHidden()
-                        .tint(state.kind.tint)
+                Text(title).font(.headline)
+                if state.mode == .timer {
+                    if state.isRunning {
+                        ProgressView(timerInterval: state.timerRange, countsDown: false)
+                            .labelsHidden()
+                            .tint(tint)
+                    } else {
+                        ProgressView(value: state.pausedFraction, total: 1)
+                            .labelsHidden()
+                            .tint(tint)
+                    }
                 } else {
-                    ProgressView(value: state.pausedFraction, total: 1)
-                        .labelsHidden()
-                        .tint(state.kind.tint)
+                    Text(state.mode == .onBreak ? "Break in progress" : "Working")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+
             Spacer()
-            Text(timerInterval: state.timerRange,
-                 pauseTime: state.isRunning ? nil : state.pausedAt,
-                 countsDown: true)
-                .font(.system(.title2, design: .rounded).monospacedDigit())
-                .frame(width: 82, alignment: .trailing)
+
+            Group {
+                if state.mode == .timer {
+                    Text(timerInterval: state.timerRange,
+                         pauseTime: state.isRunning ? nil : state.pausedAt,
+                         countsDown: true)
+                } else if let since = state.since {
+                    Text(since, style: .timer)
+                } else {
+                    Text("--:--")
+                }
+            }
+            .font(.system(.title2, design: .rounded).monospacedDigit())
+            .frame(width: 82, alignment: .trailing)
         }
         .padding()
+    }
+
+    private var title: String {
+        switch state.mode {
+        case .timer: return state.kind.displayName
+        case .clockedIn: return "Clocked in"
+        case .onBreak: return "On break"
+        }
+    }
+
+    private var symbol: String {
+        switch state.mode {
+        case .timer: return state.kind.symbolName
+        case .clockedIn: return "clock.badge.checkmark"
+        case .onBreak: return "cup.and.saucer.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch state.mode {
+        case .timer: return state.kind.tint
+        case .clockedIn: return .green
+        case .onBreak: return .orange
+        }
     }
 }

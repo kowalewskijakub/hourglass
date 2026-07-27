@@ -327,6 +327,9 @@ final class SyncService {
         withRemoteApplication {
             for row in rows { model.workday.applyRemote(row.clockSession) }
         }
+        // applyRemote deliberately skips the tracker's hooks to avoid echoing the
+        // change back, so nudge the host directly.
+        model.onWorkdayChanged?()
     }
 
     private func applyRemoteSettings(_ settings: TimerSettings) {

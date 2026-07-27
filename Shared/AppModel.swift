@@ -42,13 +42,21 @@ final class AppModel {
     /// Cross-device sync, attached by the app at launch (nil until then).
     @ObservationIgnored weak var sync: SyncService?
 
+    /// Fires whenever the workday changes — locally or from another device — so
+    /// hosts can refresh things like the Live Activity.
+    var onWorkdayChanged: (@MainActor () -> Void)?
+
     private func installEngineHooks() {
         // Any clock-in/out, break or manual edit mirrors to the other devices.
         workday.onSessionChanged = { [weak self] session in
-            self?.sync?.pushClockSession(session)
+            guard let self else { return }
+            sync?.pushClockSession(session)
+            onWorkdayChanged?()
         }
         workday.onSessionDeleted = { [weak self] id in
-            self?.sync?.deleteClockSession(id: id)
+            guard let self else { return }
+            sync?.deleteClockSession(id: id)
+            onWorkdayChanged?()
         }
 
         engine.onSessionStarted = { [weak self] kind, secondsRemaining in
