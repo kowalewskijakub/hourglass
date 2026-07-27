@@ -15,10 +15,22 @@ final class SyncService {
 
     enum State: Equatable {
         case off
-        /// Syncing; `code` is a pairing code currently on offer to another device.
-        case syncing(code: String?)
+        /// Syncing; `pairing` is a code currently on offer to another device.
+        case syncing(pairing: PairingCode?)
         case failed(String)
     }
+
+    /// A pairing code together with the moment it stops working.
+    struct PairingCode: Equatable {
+        let code: String
+        let expiresAt: Date
+
+        var isExpired: Bool { Date() >= expiresAt }
+        var secondsRemaining: Int { max(0, Int(expiresAt.timeIntervalSinceNow.rounded(.up))) }
+    }
+
+    /// Matches the 5-minute window enforced by `create_pairing` in the database.
+    static let pairingLifetime: TimeInterval = 5 * 60
 
     private(set) var state: State = .off
     /// Set while a network call is in flight, so the UI can show progress.
@@ -56,7 +68,7 @@ final class SyncService {
         defer { isBusy = false }
         do {
             if !isSignedIn { try await client.auth.signInAnonymously() }
-            state = .syncing(code: nil)
+            state = .syncing(pairing: nil)
             await startSyncing()
         } catch {
             state = .failed(error.localizedDescription)
@@ -77,7 +89,7 @@ final class SyncService {
             try await client
                 .rpc("create_pairing", params: ["p_code": code, "p_refresh_token": refreshToken])
                 .execute()
-            state = .syncing(code: code)
+            state = .syncing(pairing: PairingCode(code: code, expiresAt: Date().addingTimeInterval(Self.pairingLifetime)))
             await startSyncing()
         } catch {
             state = .failed(error.localizedDescription)
@@ -99,7 +111,7 @@ final class SyncService {
                 return
             }
             try await client.auth.refreshSession(refreshToken: token)
-            state = .syncing(code: nil)
+            state = .syncing(pairing: nil)
             await startSyncing()
         } catch {
             state = .failed(error.localizedDescription)
@@ -115,8 +127,14 @@ final class SyncService {
     /// Resumes an existing session at launch.
     func restore() async {
         guard isSignedIn else { return }
-        state = .syncing(code: nil)
+        state = .syncing(pairing: nil)
         await startSyncing()
+    }
+
+    /// Clears a pairing code that has run out, so the UI stops offering it.
+    func discardExpiredPairingCode() {
+        guard case .syncing(let pairing) = state, let pairing, pairing.isExpired else { return }
+        state = .syncing(pairing: nil)
     }
 
     // MARK: Pairing codes
@@ -166,6 +184,10 @@ final class SyncService {
                 .from("settings").select().eq("user_id", value: userID).execute().value
             if let payload = settings.first?.payload { applyRemoteSettings(payload) }
 
+            let clocks: [ClockSessionRow] = try await client
+                .from("clock_sessions").select().eq("user_id", value: userID).execute().value
+            applyRemoteClockSessions(clocks)
+
             let live: [LiveStateRow] = try await client
                 .from("live_state").select().eq("user_id", value: userID).execute().value
             if let row = live.first { applyRemoteLiveState(row) }
@@ -181,6 +203,7 @@ final class SyncService {
         let liveChanges = channel.postgresChange(AnyAction.self, table: "live_state")
         let sessionChanges = channel.postgresChange(AnyAction.self, table: "sessions")
         let settingsChanges = channel.postgresChange(AnyAction.self, table: "settings")
+        let clockChanges = channel.postgresChange(AnyAction.self, table: "clock_sessions")
 
         await channel.subscribe()
 
@@ -194,6 +217,12 @@ final class SyncService {
             for await change in sessionChanges {
                 guard let record: SessionRow = Self.record(from: change) else { continue }
                 self?.applyRemoteSessions([record])
+            }
+        })
+        listenerTasks.append(Task { @MainActor [weak self] in
+            for await change in clockChanges {
+                guard let record: ClockSessionRow = Self.record(from: change) else { continue }
+                self?.applyRemoteClockSessions([record])
             }
         })
         listenerTasks.append(Task { @MainActor [weak self] in
@@ -231,6 +260,21 @@ final class SyncService {
         Task { [client] in await Self.upsert(client, table: "sessions", values: row, onConflict: "id") }
     }
 
+    /// Mirrors a clocked-in stretch (and its breaks) to the other devices.
+    func pushClockSession(_ session: ClockSession) {
+        guard !isApplyingRemote, isSignedIn,
+              let userID = client.auth.currentUser?.id.uuidString else { return }
+        let row = ClockSessionRow(session: session, userID: userID)
+        Task { [client] in await Self.upsert(client, table: "clock_sessions", values: row, onConflict: "id") }
+    }
+
+    func deleteClockSession(id: ClockSession.ID) {
+        guard !isApplyingRemote, isSignedIn else { return }
+        Task { [client] in
+            _ = try? await client.from("clock_sessions").delete().eq("id", value: id.uuidString).execute()
+        }
+    }
+
     func pushSettings() {
         guard !isApplyingRemote, isSignedIn,
               let userID = client.auth.currentUser?.id.uuidString else { return }
@@ -262,6 +306,12 @@ final class SyncService {
                     model.historyStore.add(session)
                 }
             }
+        }
+    }
+
+    private func applyRemoteClockSessions(_ rows: [ClockSessionRow]) {
+        withRemoteApplication {
+            for row in rows { model.workday.applyRemote(row.clockSession) }
         }
     }
 

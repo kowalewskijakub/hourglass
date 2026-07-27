@@ -132,3 +132,27 @@ revoke all on function public.claim_pairing(text) from public;
 grant execute on function public.create_pairing(text, text) to authenticated;
 -- anon needs this: the joining device has no session yet.
 grant execute on function public.claim_pairing(text) to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Clock sessions (applied 2026-07-26)
+-- Clocked-in stretches of a working day. Breaks travel as JSONB because they
+-- only ever move with their parent session.
+-- ---------------------------------------------------------------------------
+create table if not exists public.clock_sessions (
+    id             uuid primary key,
+    user_id        uuid        not null references auth.users (id) on delete cascade,
+    clocked_in_at  timestamptz not null,
+    clocked_out_at timestamptz,
+    breaks         jsonb       not null default '[]'::jsonb,
+    updated_at     timestamptz not null default now()
+);
+
+create index if not exists clock_sessions_user_start_idx
+    on public.clock_sessions (user_id, clocked_in_at desc);
+
+alter table public.clock_sessions enable row level security;
+
+create policy "own clock_sessions" on public.clock_sessions
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+alter publication supabase_realtime add table public.clock_sessions;

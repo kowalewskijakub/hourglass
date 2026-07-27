@@ -75,10 +75,14 @@ targets:
         embed: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.hourglass.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.kowalewskijakub.hourglass
         PRODUCT_NAME: Hourglass
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Device builds need real signing; macOS stays ad-hoc.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: FFYY86SSY8
     info:
       path: Apps/iOS/Info.plist
       properties:
@@ -109,8 +113,11 @@ targets:
         product: HourglassCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.hourglass.ios.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.kowalewskijakub.hourglass.widgets
         PRODUCT_NAME: HourglassWidgets
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: FFYY86SSY8
     info:
       path: Apps/iOSWidgets/Info.plist
       properties:

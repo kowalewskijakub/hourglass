@@ -43,6 +43,14 @@ final class AppModel {
     @ObservationIgnored weak var sync: SyncService?
 
     private func installEngineHooks() {
+        // Any clock-in/out, break or manual edit mirrors to the other devices.
+        workday.onSessionChanged = { [weak self] session in
+            self?.sync?.pushClockSession(session)
+        }
+        workday.onSessionDeleted = { [weak self] id in
+            self?.sync?.deleteClockSession(id: id)
+        }
+
         engine.onSessionStarted = { [weak self] kind, secondsRemaining in
             guard let self else { return }
             // Starting a focus session implies you're working: clock in.

@@ -50,6 +50,32 @@ struct SessionRow: Codable, Equatable {
     }
 }
 
+/// One row of `clock_sessions` — a clocked-in stretch and its breaks.
+struct ClockSessionRow: Codable, Equatable {
+    var id: UUID
+    var user_id: String
+    var clocked_in_at: Date
+    var clocked_out_at: Date?
+    var breaks: [WorkBreak]
+
+    init(session: ClockSession, userID: String) {
+        id = session.id
+        user_id = userID
+        clocked_in_at = session.clockedInAt
+        clocked_out_at = session.clockedOutAt
+        breaks = session.breaks
+    }
+
+    var clockSession: ClockSession {
+        ClockSession(
+            id: id,
+            clockedInAt: clocked_in_at,
+            clockedOutAt: clocked_out_at,
+            breaks: breaks
+        )
+    }
+}
+
 /// One row of `settings` — the user's `TimerSettings` as JSON.
 struct SettingsRow: Codable, Equatable {
     var user_id: String

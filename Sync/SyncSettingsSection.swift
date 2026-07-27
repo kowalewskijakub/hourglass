@@ -30,16 +30,12 @@ struct SyncSettingsSection: View {
                     Button("Join another device instead") { isJoining = true }
                 }
 
-            case .syncing(let code):
+            case .syncing(let pairing):
                 Label("Syncing", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
 
-                if let code {
-                    LabeledContent("Pairing code", value: SyncService.formatted(code))
-                        .font(.system(.body, design: .monospaced))
-                    Text("Enter this on your other device within 5 minutes. It works once.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if let pairing {
+                    pairingCode(pairing)
                 } else {
                     Button("Pair another device") {
                         Task { await sync.createPairingCode() }
@@ -62,5 +58,34 @@ struct SyncSettingsSection: View {
         } footer: {
             Text("Keeps the timer, log and settings in step across your devices. No account or password — pair a device with a one-time code.")
         }
+    }
+
+    /// The live code, counting down, replaced by a clear notice once it lapses.
+    @ViewBuilder
+    private func pairingCode(_ pairing: SyncService.PairingCode) -> some View {
+        // Re-renders every second so the countdown and the expiry are truthful.
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            if pairing.isExpired {
+                Label("Code expired", systemImage: "clock.badge.xmark")
+                    .foregroundStyle(.orange)
+                Button("Get a new code") {
+                    Task { await sync.createPairingCode() }
+                }
+                .disabled(sync.isBusy)
+            } else {
+                LabeledContent("Pairing code", value: SyncService.formatted(pairing.code))
+                    .font(.system(.body, design: .monospaced))
+                Text("Enter this on your other device — expires in \(timeLeft(pairing)). It works once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func timeLeft(_ pairing: SyncService.PairingCode) -> String {
+        let seconds = pairing.secondsRemaining
+        return seconds >= 60
+            ? "\(seconds / 60)m \(seconds % 60)s"
+            : "\(seconds)s"
     }
 }

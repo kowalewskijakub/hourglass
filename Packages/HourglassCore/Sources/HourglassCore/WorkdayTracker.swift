@@ -13,6 +13,13 @@ public final class WorkdayTracker {
     /// Fired when the user clocks in or out, so hosts can update reminders.
     public var onClockStateChanged: (@MainActor (_ clockedIn: Bool) -> Void)?
 
+    /// Fired whenever a clock session is created or modified (in/out, breaks,
+    /// manual edits), so hosts can mirror it to other devices.
+    public var onSessionChanged: (@MainActor (ClockSession) -> Void)?
+
+    /// Fired when a clock session is deleted.
+    public var onSessionDeleted: (@MainActor (ClockSession.ID) -> Void)?
+
     public init(
         store: any WorkdayStoring,
         clock: any PomodoroClock = SystemClock(),
@@ -49,6 +56,7 @@ public final class WorkdayTracker {
         guard !isClockedIn else { return currentSession }
         let session = ClockSession(clockedInAt: clock.now)
         store.add(session)
+        onSessionChanged?(session)
         onClockStateChanged?(true)
         return session
     }
@@ -62,7 +70,7 @@ public final class WorkdayTracker {
             let endOfDay = calendar.date(byAdding: .day, value: 1, to: sessionDay) ?? clock.now
             session.clockedOutAt = min(endOfDay, clock.now)
             endActiveBreak(in: &session, at: session.clockedOutAt ?? clock.now)
-            store.update(session)
+            persist(session)
         }
     }
 
@@ -71,7 +79,7 @@ public final class WorkdayTracker {
         guard var session = currentSession else { return }
         endActiveBreak(in: &session)
         session.clockedOutAt = clock.now
-        store.update(session)
+        persist(session)
         onClockStateChanged?(false)
     }
 
@@ -84,14 +92,14 @@ public final class WorkdayTracker {
         if !isClockedIn { clockIn() }
         guard var session = currentSession, !session.isOnBreak else { return }
         session.breaks.append(WorkBreak(startedAt: clock.now))
-        store.update(session)
+        persist(session)
     }
 
     /// End the running break, if any.
     public func endBreak() {
         guard var session = currentSession, session.isOnBreak else { return }
         endActiveBreak(in: &session)
-        store.update(session)
+        persist(session)
     }
 
     public func toggleBreak() {
@@ -100,9 +108,32 @@ public final class WorkdayTracker {
 
     // MARK: Editing (from the log)
 
-    public func update(_ session: ClockSession) { store.update(normalized(session)) }
-    public func delete(id: ClockSession.ID) { store.delete(id: id) }
-    public func add(_ session: ClockSession) { store.add(normalized(session)) }
+    public func update(_ session: ClockSession) { persist(normalized(session)) }
+    public func add(_ session: ClockSession) {
+        let session = normalized(session)
+        store.add(session)
+        onSessionChanged?(session)
+    }
+    public func delete(id: ClockSession.ID) {
+        store.delete(id: id)
+        onSessionDeleted?(id)
+    }
+
+    /// Applies a session mirrored from another device, without echoing it back.
+    public func applyRemote(_ session: ClockSession) {
+        let isKnown = store.all().contains { $0.id == session.id }
+        if isKnown { store.update(session) } else { store.add(session) }
+    }
+
+    public func deleteLocally(id: ClockSession.ID) { store.delete(id: id) }
+
+    // MARK: Persistence
+
+    /// Single write path, so every mutation notifies the sync layer.
+    private func persist(_ session: ClockSession) {
+        store.update(session)
+        onSessionChanged?(session)
+    }
 
     // MARK: Helpers
 
