@@ -57,6 +57,9 @@ struct ClockSessionRow: Codable, Equatable {
     var clocked_in_at: Date
     var clocked_out_at: Date?
     var breaks: [WorkBreak]
+    /// Stamped on every write — the column default only fires on insert, so
+    /// without this the value goes stale the moment a row is first updated.
+    var updated_at: Date
 
     init(session: ClockSession, userID: String) {
         id = session.id
@@ -64,6 +67,7 @@ struct ClockSessionRow: Codable, Equatable {
         clocked_in_at = session.clockedInAt
         clocked_out_at = session.clockedOutAt
         breaks = session.breaks
+        updated_at = Date()
     }
 
     var clockSession: ClockSession {

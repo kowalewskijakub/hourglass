@@ -32,9 +32,10 @@ struct TimerFaceView: View {
                         .font(.system(size: 25, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                    Text(engine.kind.displayName)
+                    Label(engine.kind.displayName, systemImage: engine.kind.symbolName)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(engine.kind.tint)
+                        .labelStyle(.titleAndIcon)
                 }
             }
             .frame(width: 108, height: 108)

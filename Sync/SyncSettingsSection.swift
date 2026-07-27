@@ -53,6 +53,12 @@ struct SyncSettingsSection: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+
+            if let writeError = sync.lastSyncError {
+                Label("Couldn't save to the server — \(writeError)", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text("Sync")
         } footer: {

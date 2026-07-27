@@ -35,6 +35,10 @@ final class SyncService {
     private(set) var state: State = .off
     /// Set while a network call is in flight, so the UI can show progress.
     private(set) var isBusy = false
+    /// Last write that failed. Pushes are fire-and-forget, so without this a
+    /// rejected write (say, RLS refusing a row owned by another account) would
+    /// vanish silently and sync would look fine while diverging.
+    private(set) var lastSyncError: String?
 
     @ObservationIgnored private let client: SupabaseClient
     @ObservationIgnored private let model: AppModel
@@ -175,8 +179,33 @@ final class SyncService {
     // MARK: - Sync lifecycle
 
     private func startSyncing() async {
+        // Push before pulling. Anything changed while signed out or offline was
+        // never sent — pulling first would overwrite it with stale server state
+        // and lose the change for good.
+        await pushLocalState()
         await pullAll()
         await subscribe()
+    }
+
+    /// Uploads everything this device knows, so work done while disconnected
+    /// reaches the server instead of being silently dropped.
+    private func pushLocalState() async {
+        guard let userID = client.auth.currentUser?.id.uuidString else { return }
+
+        for session in model.workday.sessions() {
+            await write(
+                table: "clock_sessions",
+                values: ClockSessionRow(session: session, userID: userID),
+                onConflict: "id"
+            )
+        }
+        for session in model.historyStore.all() where session.completed {
+            await write(
+                table: "sessions",
+                values: SessionRow(session: session, userID: userID),
+                onConflict: "id"
+            )
+        }
     }
 
     private func stopSyncing() async {
@@ -264,14 +293,14 @@ final class SyncService {
             origin_device: deviceID,
             updated_at: Date()
         )
-        Task { [client] in await Self.upsert(client, table: "live_state", values: row, onConflict: "user_id") }
+        Task { await write(table: "live_state", values: row, onConflict: "user_id") }
     }
 
     func pushSession(_ session: FocusSession) {
         guard !isApplyingRemote, isSignedIn,
               let userID = client.auth.currentUser?.id.uuidString else { return }
         let row = SessionRow(session: session, userID: userID)
-        Task { [client] in await Self.upsert(client, table: "sessions", values: row, onConflict: "id") }
+        Task { await write(table: "sessions", values: row, onConflict: "id") }
     }
 
     /// Mirrors a clocked-in stretch (and its breaks) to the other devices.
@@ -279,7 +308,7 @@ final class SyncService {
         guard !isApplyingRemote, isSignedIn,
               let userID = client.auth.currentUser?.id.uuidString else { return }
         let row = ClockSessionRow(session: session, userID: userID)
-        Task { [client] in await Self.upsert(client, table: "clock_sessions", values: row, onConflict: "id") }
+        Task { await write(table: "clock_sessions", values: row, onConflict: "id") }
     }
 
     func deleteClockSession(id: ClockSession.ID) {
@@ -293,7 +322,7 @@ final class SyncService {
         guard !isApplyingRemote, isSignedIn,
               let userID = client.auth.currentUser?.id.uuidString else { return }
         let row = SettingsRow(user_id: userID, payload: model.settings, updated_at: Date())
-        Task { [client] in await Self.upsert(client, table: "settings", values: row, onConflict: "user_id") }
+        Task { await write(table: "settings", values: row, onConflict: "user_id") }
     }
 
     // MARK: - Apply (remote → local)
@@ -400,8 +429,26 @@ final class SyncService {
         table: String,
         values: some Codable & Sendable,
         onConflict: String
+    ) async -> String? {
+        do {
+            _ = try await client.from(table).upsert(values, onConflict: onConflict).execute()
+            return nil
+        } catch {
+            return "\(table): \(error.localizedDescription)"
+        }
+    }
+
+    /// Runs a write and records any failure so the UI can show it.
+    private func write(
+        table: String,
+        values: some Codable & Sendable,
+        onConflict: String
     ) async {
-        _ = try? await client.from(table).upsert(values, onConflict: onConflict).execute()
+        if let failure = await Self.upsert(client, table: table, values: values, onConflict: onConflict) {
+            lastSyncError = failure
+        } else {
+            lastSyncError = nil
+        }
     }
 
     /// A stable per-install identifier used purely to ignore our own echoes.
