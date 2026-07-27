@@ -49,7 +49,13 @@ final class SyncService {
         self.model = model
         client = SupabaseClient(
             supabaseURL: SyncConfig.supabaseURL,
-            supabaseKey: SyncConfig.supabaseKey
+            supabaseKey: SyncConfig.supabaseKey,
+            options: SupabaseClientOptions(
+                // Keep the session out of the Keychain: an ad-hoc-signed Mac app
+                // changes signature every build, so the Keychain re-prompts each
+                // time. A file we own avoids that (and iCloud Keychain) entirely.
+                auth: SupabaseClientOptions.AuthOptions(storage: FileSessionStorage())
+            )
         )
     }
 
