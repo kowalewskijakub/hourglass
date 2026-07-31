@@ -34,6 +34,7 @@ public final class PomodoroEngine {
     private let settingsStore: any SettingsStoring
     private let history: any HistoryStoring
     private let clock: any PomodoroClock
+    private let stamps: any UpdateStamping
     private let tickInterval: TimeInterval
 
     /// Called on the main actor whenever a session runs to completion.
@@ -55,26 +56,34 @@ public final class PomodoroEngine {
     private var endDate: Date?
     private var currentSessionStart: Date?
 
-    /// True while the current session is a reconstruction of another device's
-    /// timer rather than one started here.
+    /// The identity of the session currently on the clock, minted at `start()`
+    /// and shared across devices through the live state.
     ///
     /// Both devices run their own countdown off the shared `endDate`, so both
-    /// reach zero — but the session happened once. The device that started it
-    /// owns the record; a mirror writes no history and pushes none, or the same
-    /// Pomodoro lands twice under two different ids. Hosts are still told the
-    /// session finished, because the person watching the mirror should still
-    /// hear it.
+    /// reach zero — but the session happened once. Instead of electing an owner
+    /// (which auto-start kept breaking, recording every session twice), every
+    /// device records the completion **under the same id**: the stores upsert by
+    /// id, so however many devices witness the finish, history holds one row.
+    public private(set) var currentSessionID: UUID?
+
+    /// True while the current session is a reconstruction of another device's
+    /// timer rather than one started here. Purely informational now that
+    /// records are deduplicated by ``currentSessionID``.
     public private(set) var isMirroring = false
 
     public init(
         settingsStore: any SettingsStoring,
         history: any HistoryStoring,
         clock: any PomodoroClock = SystemClock(),
+        stamps: (any UpdateStamping)? = nil,
         tickInterval: TimeInterval = 0.25
     ) {
         self.settingsStore = settingsStore
         self.history = history
         self.clock = clock
+        // Defaults to the injected clock, so stamps stay deterministic under
+        // test clocks; the app swaps in the shared hybrid clock for sync.
+        self.stamps = stamps ?? WallClockStamps(wallClock: { clock.now })
         self.tickInterval = tickInterval
         self.remaining = settingsStore.settings.duration(for: .focus)
     }
@@ -141,7 +150,8 @@ public final class PomodoroEngine {
         let now = clock.now
         endDate = now.addingTimeInterval(remaining)
         currentSessionStart = now
-        isMirroring = false // started here, so this device records it
+        currentSessionID = UUID() // a fresh identity, shared via the live state
+        isMirroring = false // started here
         phase = .running
         scheduleTicks()
         onSessionStarted?(kind, remaining)
@@ -177,40 +187,80 @@ public final class PomodoroEngine {
     /// Scrub backward to the previous phase (clamped at the first focus).
     public func goToPreviousPhase() { move(to: cyclePosition - 1) }
 
+    /// What adopting a remote state amounted to, so the host can mirror the
+    /// side effects a local action would have had (notifications, Live
+    /// Activity). Without this a mirrored Pomodoro was invisible the moment the
+    /// app backgrounded: nothing had scheduled its completion alert.
+    public enum RemoteAdoption: Equatable, Sendable {
+        /// A session began (or its deadline moved): schedule the look-ahead alert.
+        case startedRunning(kind: SessionKind, remaining: TimeInterval)
+        /// The running session froze: cancel pending alerts, keep the activity.
+        case paused
+        /// The session ended or was abandoned elsewhere: tear everything down.
+        case stopped
+        /// Nothing user-visible changed.
+        case unchanged
+    }
+
     /// Adopt timer state mirrored from another device.
     ///
     /// The countdown is reconstructed locally from `endDate`, so the two devices
     /// agree without streaming ticks. A paused peer sends the instant it froze at
     /// plus an `endDate` measured from it, so the frozen remaining survives the
     /// trip instead of the session resetting under the other device's feet.
-    /// Callbacks are intentionally *not* fired — this is a mirror of a decision
-    /// made elsewhere, not a new local action.
-    public func applyRemoteState(cyclePosition: Int, isRunning: Bool, endDate: Date?, pausedAt: Date?) {
+    ///
+    /// Engine callbacks are intentionally *not* fired — this is a mirror of a
+    /// decision made elsewhere, not a new local action — but the returned
+    /// ``RemoteAdoption`` tells the host what changed so it can keep alerts and
+    /// Live Activities truthful.
+    @discardableResult
+    public func applyRemoteState(
+        cyclePosition: Int,
+        isRunning: Bool,
+        endDate: Date?,
+        pausedAt: Date?,
+        sessionID: UUID? = nil
+    ) -> RemoteAdoption {
+        let wasActive = phase != .idle
+        let previousPhase = phase
+        let previousEndDate = self.endDate
         clock.cancel()
         self.cyclePosition = max(0, cyclePosition)
 
-        // Adopting never takes ownership away from a session this device
-        // started: only an idle device — or one already mirroring — becomes a
-        // mirror. Two devices that auto-start the same phase at the same instant
-        // therefore each keep their own session, which at worst repeats the old
-        // duplicate; disowning both would record the session nowhere at all.
+        // Whether this device already holds a session it started itself. Kept
+        // for the ownership flag; record identity now travels as `sessionID`,
+        // so two devices that auto-start the same phase converge on one id
+        // (the later write's) instead of each recording their own copy.
         let ownsCurrentSession = phase != .idle && !isMirroring
 
         if isRunning, let endDate {
             let remaining = max(0, endDate.timeIntervalSince(clock.now))
             guard remaining > 0 else {
+                // The row describes a session whose deadline has already
+                // passed: it completed out there, whether or not its device
+                // was awake to say so. Land where the completion leads — idle
+                // at the NEXT phase — not at the position the stale row still
+                // names. (The record itself arrives from whichever device
+                // witnessed the finish; landing pre-advance regressed us.)
+                self.cyclePosition = max(0, cyclePosition) + 1
                 self.endDate = nil
                 phase = .idle
                 self.remaining = plannedDuration
+                currentSessionID = nil
                 isMirroring = false
-                return
+                return wasActive ? .stopped : .unchanged
             }
             self.endDate = endDate
             self.remaining = remaining
             if currentSessionStart == nil { currentSessionStart = clock.now }
+            if let sessionID { currentSessionID = sessionID }
             isMirroring = !ownsCurrentSession
             phase = .running
             scheduleTicks()
+            let deadlineMoved = previousEndDate.map { abs($0.timeIntervalSince(endDate)) > 1 } ?? true
+            return (previousPhase != .running || deadlineMoved)
+                ? .startedRunning(kind: kind, remaining: remaining)
+                : .unchanged
         } else if let endDate, let pausedAt {
             // Frozen time is the only truth while paused — there is no deadline
             // to count against, so drop the peer's and keep `remaining` intact.
@@ -222,14 +272,18 @@ public final class PomodoroEngine {
             if currentSessionStart == nil {
                 currentSessionStart = clock.now.addingTimeInterval(-max(0, plannedDuration - remaining))
             }
+            if let sessionID { currentSessionID = sessionID }
             isMirroring = !ownsCurrentSession
             phase = .paused
+            return previousPhase == .paused ? .unchanged : .paused
         } else {
             self.endDate = nil
             currentSessionStart = nil
+            currentSessionID = nil
             phase = .idle
             remaining = plannedDuration
             isMirroring = false
+            return wasActive ? .stopped : .unchanged
         }
     }
 
@@ -274,28 +328,31 @@ public final class PomodoroEngine {
         if wasActive { recordAbandonedFocusIfSubstantial() }
         endDate = nil
         currentSessionStart = nil
+        currentSessionID = nil
         isMirroring = false // torn down; the next start decides ownership afresh
         return wasActive
     }
 
     /// If the user actually focused for a meaningful stretch before abandoning,
     /// record the *real* focused time (never a "skipped" marker).
+    ///
+    /// Recorded under the shared session id, so an abandon tapped on the mirror
+    /// no longer discards the stretch (the old owner-only rule did exactly
+    /// that), and both devices abandoning at once still yields a single row.
     private func recordAbandonedFocusIfSubstantial() {
-        // The device that started it logs the abandon; a mirror abandoning its
-        // reconstruction would file the same stretch of focus a second time.
-        guard !isMirroring else { return }
         guard kind == .focus, let start = currentSessionStart else { return }
         if phase == .running { recomputeRemaining() }
         let focused = plannedDuration - remaining
         guard focused >= Self.minLoggedFocus else { return }
-        history.add(
+        history.upsert(
             FocusSession(
+                id: currentSessionID ?? UUID(),
                 kind: .focus,
                 plannedDuration: focused,
                 startedAt: start,
                 endedAt: clock.now,
                 completed: true,
-                updatedAt: clock.now
+                updatedAt: stamps.next()
             )
         )
     }
@@ -321,12 +378,16 @@ public final class PomodoroEngine {
         clock.cancel()
         remaining = 0
         let finished = finishCurrentSession(completed: true)
-        if let finished { onSessionCompleted?(finished) }
 
-        // Advance to the next phase in the cycle.
+        // Advance to the next phase BEFORE announcing the completion. Listeners
+        // snapshot the engine and mirror it to other devices; announcing first
+        // published "running, ends right now, old position" as the final state,
+        // and every peer that applied it regressed to the phase just finished.
         cyclePosition += 1
         phase = .idle
         remaining = plannedDuration
+
+        if let finished { onSessionCompleted?(finished) }
 
         let autoStart = kind.isBreak ? settings.autoStartBreaks : settings.autoStartFocus
         if autoStart { start() }
@@ -335,18 +396,27 @@ public final class PomodoroEngine {
     @discardableResult
     private func finishCurrentSession(completed: Bool) -> FocusSession? {
         guard let start = currentSessionStart else { return nil }
+        // A completion can be observed late — the app was suspended past the
+        // deadline. The session still ended when its clock ran out, not when
+        // we happened to notice; recording "now" would misstate the day by
+        // hours and outrank the peer that recorded it correctly at the time.
+        let ended = min(clock.now, endDate ?? clock.now)
         let session = FocusSession(
+            id: currentSessionID ?? UUID(),
             kind: kind,
             plannedDuration: plannedDuration,
             startedAt: start,
-            endedAt: clock.now,
+            endedAt: ended,
             completed: completed,
-            updatedAt: clock.now
+            updatedAt: stamps.next()
         )
-        // A mirror still reports the session so hosts can alert, but the record
-        // belongs to the device that started it and arrives here by sync.
-        if !isMirroring { history.add(session) }
+        // Every device that witnesses the finish records it — under the shared
+        // session id, so the stores and the server upsert the copies into one
+        // row. This is what lets a Pomodoro survive the starting device being
+        // offline at the moment it completes.
+        history.upsert(session)
         currentSessionStart = nil
+        currentSessionID = nil
         endDate = nil
         return session
     }

@@ -13,6 +13,11 @@ final class AppModel {
     let historyStore: FileHistoryStore
     let engine: PomodoroEngine
     let workday: WorkdayTracker
+    /// One stamp order for the whole device: every `updatedAt` the engine, the
+    /// tracker, the log editors or the sync layer issue comes from here, so
+    /// last-writer-wins compares one consistent sequence — and never falls
+    /// behind a stamp already seen from the server (see `HybridStampClock`).
+    @ObservationIgnored let stamps: HybridStampClock
 
     @ObservationIgnored private let calendar: Calendar = .current
 
@@ -20,10 +25,12 @@ final class AppModel {
         let settings = UserDefaultsSettingsStore()
         let history = FileHistoryStore()
         let workdays = FileWorkdayStore()
+        let stamps = HybridStampClock(defaults: .standard, key: "hourglass.stampClock")
         self.settingsStore = settings
         self.historyStore = history
-        self.engine = PomodoroEngine(settingsStore: settings, history: history, clock: SystemClock())
-        self.workday = WorkdayTracker(store: workdays)
+        self.stamps = stamps
+        self.engine = PomodoroEngine(settingsStore: settings, history: history, clock: SystemClock(), stamps: stamps)
+        self.workday = WorkdayTracker(store: workdays, stamps: stamps)
         installEngineHooks()
     }
 
@@ -56,6 +63,11 @@ final class AppModel {
             sync?.deleteClockSession(id: id)
             onWorkdayChanged?()
         }
+        workday.onBreakDeleted = { [weak self] sessionID, entryID in
+            guard let self else { return }
+            sync?.deleteBreak(sessionID: sessionID, entryID: entryID)
+            onWorkdayChanged?()
+        }
 
         engine.onSessionStarted = { [weak self] kind, secondsRemaining in
             guard let self else { return }
@@ -70,13 +82,53 @@ final class AppModel {
         }
         engine.onSessionCompleted = { [weak self] session in
             guard let self else { return }
-            // Both devices run the countdown, so both arrive here — but only the
-            // one that started the session owns its record. Mirroring the finish
-            // would file the same Pomodoro twice under two ids. The host hook
-            // still runs: whoever is watching this screen should still be told.
-            if !engine.isMirroring { sync?.pushSession(session) }
-            sync?.pushLiveState()
+            // Both devices run the countdown, so both arrive here, and both
+            // push — under the session id the live state carried, so the
+            // copies upsert into one row instead of landing twice. (The old
+            // owner-only rule broke under auto-start and lost the record
+            // entirely when the owner happened to be offline.)
+            sync?.pushSession(session)
+            // A completion noticed long after the fact — the app slept past
+            // the deadline — mirrors with its stamp anchored at the actual
+            // end, so it cannot bury what other devices have done since.
+            let lateBy = session.endedAt.map { Date().timeIntervalSince($0) } ?? 0
+            if lateBy > 60, let ended = session.endedAt {
+                sync?.pushLiveState(asOf: ended)
+            } else {
+                sync?.pushLiveState()
+            }
             onSessionCompleted?(session)
+        }
+    }
+
+    /// Adopts timer state arriving from another device, then mirrors the side
+    /// effects a local action would have had onto the host hooks: schedule the
+    /// completion alert, keep the Live Activity truthful. Without this a
+    /// mirrored Pomodoro was invisible and silent the moment the app
+    /// backgrounded — nothing had scheduled its alert.
+    func applyRemoteTimer(
+        cyclePosition: Int,
+        isRunning: Bool,
+        endDate: Date?,
+        pausedAt: Date?,
+        sessionID: UUID?
+    ) {
+        let adoption = engine.applyRemoteState(
+            cyclePosition: cyclePosition,
+            isRunning: isRunning,
+            endDate: endDate,
+            pausedAt: pausedAt,
+            sessionID: sessionID
+        )
+        switch adoption {
+        case .startedRunning(let kind, let remaining):
+            onSessionStarted?(kind, remaining)
+        case .paused:
+            onSessionInterrupted?(false)
+        case .stopped:
+            onSessionInterrupted?(true)
+        case .unchanged:
+            break
         }
     }
 
@@ -145,14 +197,14 @@ final class AppModel {
 
     func addSession(_ session: FocusSession) {
         var session = session
-        session.updatedAt = Date()
+        session.updatedAt = stamps.next()
         historyStore.add(session)
         sync?.pushSession(session)
     }
 
     func updateSession(_ session: FocusSession) {
         var session = session
-        session.updatedAt = Date()
+        session.updatedAt = stamps.next()
         historyStore.update(session)
         sync?.pushSession(session)
     }

@@ -1,51 +1,31 @@
 import SwiftUI
 
-/// Sync setup UI: turn sync on, then pair other devices with a one-time code.
-/// No account, no password, no email.
+/// Sync setup UI: turn sync on, pair other devices with a one-time code, and —
+/// crucially — recover without data loss. A device that ever synced is never
+/// silently handed a fresh empty account: that used to split the user's
+/// devices across two accounts, both showing a green "Syncing" while nothing
+/// crossed.
 struct SyncSettingsSection: View {
     @Bindable var sync: SyncService
     @State private var enteredCode = ""
     @State private var isJoining = false
+    @State private var confirmingDisconnect = false
+    @State private var confirmingStartOver = false
 
     var body: some View {
         Section {
             switch sync.state {
-            case .off, .failed:
-                Button("Turn on sync") {
-                    Task { await sync.enableSync() }
-                }
-                .disabled(sync.isBusy)
+            case .off where !sync.hasSyncedBefore, .failed where !sync.hasSyncedBefore:
+                firstRun
 
-                if isJoining {
-                    TextField("Pairing code", text: $enteredCode)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.characters)
-                        #endif
-                        .disableAutocorrection(true)
-                    Button("Join") {
-                        Task { await sync.redeemPairingCode(enteredCode) }
-                    }
-                    .disabled(enteredCode.isEmpty || sync.isBusy)
-                } else {
-                    Button("Join another device instead") { isJoining = true }
-                }
+            case .off, .failed:
+                paused
+
+            case .sessionLost:
+                sessionLost
 
             case .syncing(let pairing):
-                Label("Syncing", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-
-                if let pairing {
-                    pairingCode(pairing)
-                } else {
-                    Button("Pair another device") {
-                        Task { await sync.createPairingCode() }
-                    }
-                    .disabled(sync.isBusy)
-                }
-
-                Button("Turn off sync", role: .destructive) {
-                    Task { await sync.stopSync() }
-                }
+                syncing(pairing)
             }
 
             if case .failed(let message) = sync.state {
@@ -55,12 +35,137 @@ struct SyncSettingsSection: View {
             }
 
             if let writeError = sync.lastSyncError {
-                Label("Couldn't save to the server — \(writeError)", systemImage: "exclamationmark.triangle")
+                Label("Couldn't reach the server — \(writeError)", systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
         } header: {
             Text("Sync")
+        }
+        .confirmationDialog(
+            "Disconnect this device?",
+            isPresented: $confirmingDisconnect,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect", role: .destructive) {
+                Task { await sync.disconnect() }
+            }
+        } message: {
+            Text("If no other device is paired to this account, its synced data becomes unreachable. Pair another device first to keep it.")
+        }
+        .confirmationDialog(
+            "Start over with a new sync account?",
+            isPresented: $confirmingStartOver,
+            titleVisibility: .visible
+        ) {
+            Button("Start over", role: .destructive) {
+                Task {
+                    await sync.disconnect()
+                    await sync.enableSync()
+                }
+            }
+        } message: {
+            Text("This device keeps its local data and uploads it to a fresh account. Other devices stay on the old account until they join this one.")
+        }
+    }
+
+    // MARK: States
+
+    /// Never synced here: enable fresh, or join an existing account.
+    @ViewBuilder private var firstRun: some View {
+        Button("Turn on sync") {
+            Task { await sync.enableSync() }
+        }
+        .disabled(sync.isBusy)
+
+        joinField
+    }
+
+    /// Synced before and still holding the account — sync is just switched off.
+    /// (If the session turns out to be gone, Resume lands in `.sessionLost`
+    /// rather than silently minting a fresh account.)
+    @ViewBuilder private var paused: some View {
+        Label("Sync is paused", systemImage: "pause.circle")
+            .foregroundStyle(.secondary)
+
+        Button("Resume sync") {
+            Task { await sync.enableSync() }
+        }
+        .disabled(sync.isBusy)
+
+        joinField
+
+        Button("Disconnect this device…", role: .destructive) {
+            confirmingDisconnect = true
+        }
+        .disabled(sync.isBusy)
+    }
+
+    /// The session died underneath us (revoked or expired). The account and
+    /// its data still exist — rejoining from another paired device is the
+    /// recovery that keeps them.
+    @ViewBuilder private var sessionLost: some View {
+        Label("This device was signed out of sync", systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+        Text("Your data is still on the server. On a device that still syncs, choose “Pair another device” and enter the code here.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        joinField
+
+        Button("Start over with a new account…", role: .destructive) {
+            confirmingStartOver = true
+        }
+        .disabled(sync.isBusy)
+    }
+
+    @ViewBuilder private func syncing(_ pairing: SyncService.PairingCode?) -> some View {
+        HStack {
+            Label("Syncing", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            if sync.pendingWrites > 0 {
+                Spacer()
+                Text("\(sync.pendingWrites) pending")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if let pairing {
+            pairingCode(pairing)
+        } else {
+            Button("Pair another device") {
+                Task { await sync.createPairingCode() }
+            }
+            .disabled(sync.isBusy)
+        }
+
+        Button("Pause sync") {
+            Task { await sync.pauseSync() }
+        }
+        .disabled(sync.isBusy)
+
+        Button("Disconnect this device…", role: .destructive) {
+            confirmingDisconnect = true
+        }
+        .disabled(sync.isBusy)
+    }
+
+    // MARK: Pieces
+
+    @ViewBuilder private var joinField: some View {
+        if isJoining {
+            TextField("Pairing code", text: $enteredCode)
+                #if os(iOS)
+                .textInputAutocapitalization(.characters)
+                #endif
+                .disableAutocorrection(true)
+            Button("Join") {
+                Task { await sync.redeemPairingCode(enteredCode) }
+            }
+            .disabled(enteredCode.isEmpty || sync.isBusy)
+        } else {
+            Button("Join another device instead") { isJoining = true }
         }
     }
 

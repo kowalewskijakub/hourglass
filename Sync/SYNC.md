@@ -1,126 +1,133 @@
-# Real-time sync (Supabase + Sign in with Apple)
+# Real-time sync (Supabase, protocol v2)
 
-Live timer + settings + history sync across macOS and iOS. No iCloud. The running
-session mirrors in ~1s because devices exchange only `{kind, end_date, is_running,
-paused_at}` and compute the countdown locally from `end_date`.
+Live timer + workdays + history + settings sync across macOS and iOS. No
+iCloud. The running session mirrors in ~1s because devices exchange only a tiny
+`live_state` row and compute the countdown locally from `end_date`.
 
-## Prerequisites (you provide)
+## Setup
 
-### 1. Supabase project
-- Create a free project at https://supabase.com.
-- Run [`supabase-schema.sql`](supabase-schema.sql) in the SQL editor.
-- Copy the **Project URL** and **anon public** key (Project Settings → API). The
-  anon key is safe to embed in a client app (RLS protects the data).
+1. Create a free project at https://supabase.com.
+2. Run [`supabase-schema.sql`](supabase-schema.sql) in the SQL editor. The file
+   is **idempotent and cumulative**: safe to run on a fresh project or over any
+   older Hourglass schema, and re-running it is the upgrade path. Clients check
+   the `schema_version` table at connect and pause with an actionable message
+   if the database is older than they are.
+3. Deploy the pairing Edge Function from the repo root:
+   `supabase functions deploy claim-pairing`
+   (source in [`supabase/functions/claim-pairing`](../supabase/functions/claim-pairing/index.ts);
+   `supabase/config.toml` disables gateway JWT verification for it — required,
+   because the joining device is signed out when it calls. If deploying some
+   other way, pass `--no-verify-jwt`.)
+4. Enable **anonymous sign-ins**: Authentication → Sign In / Providers.
+5. Add `Sync/SyncConfig.swift` (git-ignored) with the project URL and anon key.
 
-### 2. Sign in with Apple  ⚠️ needs a paid Apple Developer account
-"Sign in with Apple" is an **entitlement**, so both apps must be signed with a real
-**Development Team** (Apple Developer Program, $99/yr) — the current ad-hoc
-`CODE_SIGN_IDENTITY = "-"` cannot carry it. You'll need to:
-- Enable the **Sign in with Apple** capability on both App IDs
-  (`com.hourglass.mac`, `com.hourglass.ios`) in the Apple Developer portal.
-- Set `DEVELOPMENT_TEAM` in `project.yml` and switch signing to Automatic.
-- In Supabase → Authentication → Providers → **Apple**, add both bundle IDs as
-  authorized client IDs (for native token sign-in no client secret is required).
+> ⚠️ **Update every device together.** A pre-v2 build doesn't check the schema
+> version and writes the old shapes (no `session_id`, embedded breaks). Mixed
+> fleets mostly degrade gracefully, but a v1 write can leave a stale
+> `live_state.session_id` standing for v2 peers. In practice v1 builds can't
+> hold a session for more than an hour anyway (the token-sharing bug below),
+> so updating everything at once is both required and painless.
 
-> No Apple Developer account? The cleanest fallback with ad-hoc signing is
-> **email magic link** — say the word and I'll wire that instead (no entitlement,
-> no team needed).
+## The five guarantees, and what enforces them
 
-### 3. Credentials
-Add `Sync/SyncConfig.swift` (git-ignored) — I'll provide the template:
-```swift
-enum SyncConfig {
-    static let supabaseURL = URL(string: "https://YOUR-PROJECT.supabase.co")!
-    static let supabaseAnonKey = "YOUR-ANON-KEY"
-}
-```
+1. **No write is lost or reordered.** Every outgoing write — rows, settings,
+   the live timer, deletions — goes through `SyncOutbox`: a durable, ordered,
+   coalescing queue on disk, drained front-to-back by a single worker with
+   backoff retry. An entry leaves the queue only when the server confirms it.
+   Offline just means the queue grows; reconnecting drains it before anything
+   is pulled.
+2. **Conflicts resolve the same way everywhere, even with skewed clocks.**
+   Last-writer-wins on `updated_at`, stamped by `HybridStampClock`: stamps
+   never repeat and never fall behind a stamp already seen from the server, so
+   a device with a fast wall clock cannot bury an edit made after its write
+   was seen. The same rule is enforced twice: at apply time on every client,
+   and by the `ignore_stale_writes` trigger on the server — whatever order
+   writes arrive in, the newer row stands.
+3. **A deletion is a fact, not an absence.** Deletes are tombstone rows
+   (`deleted_at`), compared by stamp like any other change; live rows write
+   `deleted_at = null` explicitly, so an edit that outranks a tombstone
+   *resurrects* the row instead of half-dying under it. Tombstones ride the
+   same outbox as everything else, so an offline deletion replays with its
+   original stamp.
+4. **One Pomodoro, one record.** The live state carries the running session's
+   id. Every device that witnesses the finish records it under that id and the
+   stores upsert by id, so however many devices were watching — or auto-started
+   the next phase together — history holds one row. The engine announces a
+   completion only *after* advancing to the next phase, so the row peers adopt
+   is the settled state, never "running, ends right now, old position".
+5. **Breaks merge, they don't clobber.** Each break is its own `work_breaks`
+   row with its own stamp. Two devices editing different parts of the same day
+   merge cleanly; the old embedded-array design let a stale offline device
+   erase a whole day's breaks with one late clock-out.
 
-## What I'll build once the above is ready
-- Add the `supabase-swift` SPM package to both app targets.
-- A `SyncService` (@MainActor): sign-in, initial load, Realtime subscriptions,
-  push local changes (hooked into the engine callbacks + stores), apply remote.
-- Live mirroring via an upsert to `live_state` on every start/pause/resume/scrub/
-  complete; echo filtered by `origin_device`; last-writer-wins.
-- A **Sync** section in Settings (sign in/out, on/off, status).
+## The running timer (`live_state`)
 
-## The protocol
+One row per user, upserted on every engine transition, echo-filtered by
+`origin_device`, and applied only above the device's *floor* — the newest
+stamp it has pushed or applied (exact ties break on the device id, so exactly
+one of two racing devices yields and session ids converge). The countdown is
+never streamed; the receiver reconstructs it:
 
-### The running timer (`live_state`)
-One row per user, upserted on every engine transition, echo filtered by
-`origin_device`. The countdown is never streamed — the receiving device
-reconstructs it:
+| state   | `end_date`              | `paused_at`    | `is_running` |
+|---------|-------------------------|----------------|--------------|
+| running | now + remaining         | null           | true         |
+| paused  | `paused_at` + remaining | frozen instant | false        |
+| idle    | null                    | null           | false        |
 
-| state   | `end_date`            | `paused_at` | `is_running` |
-|---------|-----------------------|-------------|--------------|
-| running | now + remaining       | null        | true         |
-| paused  | `paused_at` + remaining | frozen instant | false     |
-| idle    | null                  | null        | false        |
+Adopting a remote timer fires no engine callbacks (it is a mirror of a
+decision made elsewhere) but returns what changed, and the app forwards that
+to the host hooks — so a mirrored Pomodoro still schedules its completion
+notification and Live Activity.
 
-A pause is **not** the absence of a run: both report `is_running = false`, so
-what distinguishes them is `paused_at`. What is left to run is
-`end_date - paused_at`, which is why a paused row can sit on the server for an
-hour and still resume where it froze. All three shapes are written explicitly —
-a nil that is merely omitted would leave the previous value standing, because an
-upsert only touches the columns its payload names.
+An idle device never volunteers its live state at connect: after a day
+offline its confidently-stamped "idle" would kill a session running elsewhere.
+A non-idle timer is a live user intention and is pushed.
 
-**Who records the session.** Both devices reconstruct the countdown, so both
-reach zero — but the Pomodoro happened once. The device that *started* it owns
-the history row; the other is mirroring and writes nothing, locally or upstream,
-or the same session lands twice under two ids. It is still told the session
-finished, so the person watching that screen still gets the alert.
+## Connecting, reconnecting, refreshing
 
-Adopting a remote timer never takes ownership away from a session started on
-this device: only an idle device — or one already mirroring — becomes a mirror.
-That is the tie-break for two devices auto-starting the same phase at the same
-instant; without it each would disown the session and it would be recorded
-nowhere, which is worse than the duplicate it replaces.
+`connect = check schema version → drain outbox → reconcile → subscribe → pull`.
 
-### History and workdays (`sessions`, `clock_sessions`)
-Last writer wins, decided by `updated_at`, which the client stamps on every write
-(the column default only fires on insert). A row with no stamp — written before
-they existed — counts as the oldest thing there is.
+The reconcile covers what predates the outbox or happened while sync was off:
+it reads the server's `id/updated_at` pairs and uploads only what the server
+has never seen or what this device changed strictly later — still holding a
+row is not evidence it should exist; that is exactly how a stale device buries
+a tombstone.
 
-Deletions are **soft**: the row stays and `deleted_at` is stamped. A hard DELETE
-is invisible to the other devices (Realtime reports it as a bare key with no row
-behind it, and a device that was offline is told nothing at all), so the deleted
-row simply came back the next time a device that still held it connected.
-Applying a row with `deleted_at` set deletes it locally.
+Realtime is watched, not trusted: every channel recovery to `subscribed`
+drains and re-pulls (events during the gap are gone for good otherwise), and
+the foreground/wake `refresh()` does the same. Pulls apply through the same
+staleness guards as realtime events, so pulling is always safe.
 
-Every other column is written explicitly, for the same reason `live_state` is: an
-upsert only touches the columns its payload names, so an omitted nil would leave
-the old value standing. Reopening a workday (clearing `clocked_out_at`) used to
-be undone by its own echo. `deleted_at` is the sole exception — it is named only
-on a tombstone, so a live row still writes to a database that predates it.
+## Pairing (v2 — no shared refresh tokens)
 
-A tombstone's remaining columns are placeholders, chosen to be **inert**: a
-zero-length, already-closed record. A device on a build that predates tombstones
-ignores `deleted_at` and reads the row as ordinary, so it must not describe a
-workday that is still open.
+The first device signs in anonymously. "Pair another device" publishes an
+8-character single-use code (5-minute expiry, stored hashed, account id only).
+The joining device sends the code to the `claim-pairing` Edge Function, which
+consumes it atomically and uses the service role to mint a **one-time login
+link** for the account; the device verifies the returned token hash and holds
+a session of its own.
 
-Deletion is the one change that erases its own evidence — the push walks what the
-device still holds, and a deleted row is not among it. So a deletion is recorded
-locally before it is sent, replayed on the next connect if it never landed, and
-forgotten only once the server confirms it. A replay carries the original
-deletion instant, never the retry time, so it cannot outrank a genuine later edit
-from another device.
+v1 handed the joiner the first device's refresh token. Refresh tokens rotate
+on use, so both devices shared one token family and GoTrue's reuse detection
+signed them **both** out within about an hour of pairing — the single biggest
+"sync randomly breaks" in the alpha.
 
-### Settings
-Also last-writer-wins, but `TimerSettings` carries no stamp, so the device keeps
-its own record of when it last changed them. Only a device that changed settings
-later than the server's copy uploads. Holding a *different* copy is not evidence
-of holding a **newer** one: without that record, a device that had changed
-nothing for a week overwrote the change another device made yesterday, and
-neither side showed a trace of it.
+Auth state is observed: if the session dies, the UI says so (`sessionLost`)
+and offers re-pairing. It never silently creates a fresh anonymous account —
+that would strand the data and split the user's devices across two accounts,
+each showing a green "Syncing".
 
-### Connecting
-Push, then pull, then subscribe. Push first because anything changed while
-signed out was never sent, and pulling first would overwrite it. But the push
-**reconciles** rather than re-uploading everything: it reads the server's
-`updated_at` per row and sends only what the server has never seen or what this
-device changed later. Still holding a row is not evidence it should exist — that
-is exactly how a stale device buries another device's tombstone.
+"Turn off sync" **pauses** (keeps the session; anonymous accounts have no
+other key). Disconnecting for good is a separate, confirmed, destructive
+action.
 
-> ⚠️ Deleting anything writes to `sessions.deleted_at` / `clock_sessions.deleted_at`.
-> If your project predates that column, re-run [`supabase-schema.sql`](supabase-schema.sql)
-> (it is `add column if not exists`, so re-running the whole file is safe) or the
-> write is rejected and the deletion never leaves the device.
+## Testing
+
+`Packages/HourglassCore` holds the protocol: wire rows, outbox, stamp clock,
+merge rules, engine, tracker. `SyncSimulationTests.swift` runs multi-device
+simulations against a fake server that enforces the same trigger the schema
+installs — deterministic regressions for every defect the 2026-07 sync audit
+confirmed, plus a seeded randomized sweep asserting the core property: any
+interleaving of actions, offline stretches and reconnects converges to
+identical data on every device once quiescent. `SyncService` itself stays a
+thin transport adapter.

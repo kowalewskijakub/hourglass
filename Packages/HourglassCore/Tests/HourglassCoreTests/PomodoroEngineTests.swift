@@ -290,8 +290,10 @@ import Foundation
         #expect(clock.isScheduled == false)
     }
 
-    /// A mirror that arrives after its own deadline is stale, not a countdown.
-    @Test func remoteStateWithAnElapsedEndDateFallsBackToIdle() {
+    /// A mirror that arrives after its own deadline is stale, not a countdown —
+    /// and the session it describes completed out there, so the engine lands
+    /// idle at the NEXT phase, not back at the one that already finished.
+    @Test func remoteStateWithAnElapsedEndDateLandsIdleAtTheNextPhase() {
         let (engine, _, clock) = makeEngine()
         engine.applyRemoteState(
             cyclePosition: 0,
@@ -300,7 +302,8 @@ import Foundation
             pausedAt: nil
         )
         #expect(engine.phase == .idle)
-        #expect(engine.remaining == 100)
+        #expect(engine.cyclePosition == 1)
+        #expect(engine.remaining == 20) // the short break that follows focus 0
         #expect(clock.isScheduled == false)
     }
 
@@ -376,12 +379,15 @@ import Foundation
         #expect(reloaded.updatedAt == stamped.updatedAt)
     }
 
-    // MARK: Who owns the record
+    // MARK: One session, one record
     //
     // Both devices reconstruct the countdown from the shared `endDate`, so both
-    // reach zero — but the Pomodoro happened once. The device that started it
-    // writes the history row; the mirror must not, or the same session lands
-    // twice under two different ids.
+    // reach zero — but the Pomodoro happened once. Every witness records it
+    // under the id the live state carries, and the stores upsert by id, so the
+    // copies collapse into a single row however many devices were watching.
+
+    /// The id a peer's session travels under in these tests.
+    private static let sharedSessionID = UUID()
 
     /// Adopts a peer's running session with `seconds` left to run.
     private func adoptRunning(_ engine: PomodoroEngine, clock: TestClock, seconds: TimeInterval) {
@@ -389,11 +395,12 @@ import Foundation
             cyclePosition: 0,
             isRunning: true,
             endDate: clock.now.addingTimeInterval(seconds),
-            pausedAt: nil
+            pausedAt: nil,
+            sessionID: Self.sharedSessionID
         )
     }
 
-    @Test func aMirroredSessionRecordsNoHistoryWhenItCompletes() {
+    @Test func aMirroredSessionRecordsUnderTheSharedID() {
         let (engine, history, clock) = makeEngine()
         adoptRunning(engine, clock: clock, seconds: 40)
         #expect(engine.isMirroring)
@@ -403,8 +410,12 @@ import Foundation
         clock.advance(by: 41)
 
         #expect(engine.phase == .idle)
-        #expect(history.all().isEmpty)   // the origin device owns the row
-        #expect(completions == 1)        // but this screen is still told
+        // The mirror records too — under the id the live state carried, so the
+        // origin device's copy upserts into the same row rather than a second
+        // one. This is what lets a Pomodoro survive the origin being offline
+        // at the moment it finishes.
+        #expect(history.all().map(\.id) == [Self.sharedSessionID])
+        #expect(completions == 1)
     }
 
     @Test func aLocallyStartedSessionStillRecords() {
@@ -437,9 +448,11 @@ import Foundation
         #expect(engine.phase == .idle)
     }
 
-    /// Abandoning a mirror must not file the stretch either — the origin device
-    /// records its own abandon.
-    @Test func resettingAMirrorRecordsNoAbandonedFocus() {
+    /// Abandoning from the mirror files the stretch under the shared id — the
+    /// old owner-only rule silently discarded the focus when the person tapped
+    /// reset on the device that didn't start the session. If the origin also
+    /// records its own abandon, the shared id collapses the copies to one row.
+    @Test func resettingAMirrorRecordsTheAbandonedFocusUnderTheSharedID() {
         let (engine, history, clock) = makeEngine(
             settings: TimerSettings(
                 focusDuration: 600,
@@ -453,7 +466,7 @@ import Foundation
 
         engine.reset()
 
-        #expect(history.all().isEmpty)
+        #expect(history.all().map(\.id) == [Self.sharedSessionID])
         #expect(engine.isMirroring == false) // torn down, ownership open again
     }
 

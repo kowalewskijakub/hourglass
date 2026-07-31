@@ -24,6 +24,20 @@ public protocol RecordStoring<Element>: AnyObject {
     func clear()
 }
 
+public extension RecordStoring {
+    /// Update if a record with the same id exists, otherwise add. The write
+    /// path for anything that can arrive more than once — a completion seen by
+    /// two devices, a remote row applied over a local copy — so "again" always
+    /// means "replace", never "duplicate".
+    func upsert(_ record: Element) {
+        if all().contains(where: { $0.id == record.id }) {
+            update(record)
+        } else {
+            add(record)
+        }
+    }
+}
+
 /// Persists records as a JSON array under Application Support.
 /// Observable so statistics views refresh as records are written.
 @MainActor

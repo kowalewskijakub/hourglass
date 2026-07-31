@@ -5,11 +5,18 @@ public struct WorkBreak: Codable, Sendable, Identifiable, Hashable {
     public let id: UUID
     public var startedAt: Date
     public var endedAt: Date?
+    /// When this break last changed. Breaks sync as their own rows (so two
+    /// devices editing different breaks of the same day merge instead of the
+    /// later write erasing the earlier), and this stamp is what each row's
+    /// last-writer-wins compares. Optional so files written before it existed
+    /// still decode; treated as "oldest" when absent.
+    public var updatedAt: Date?
 
-    public init(id: UUID = UUID(), startedAt: Date, endedAt: Date? = nil) {
+    public init(id: UUID = UUID(), startedAt: Date, endedAt: Date? = nil, updatedAt: Date? = nil) {
         self.id = id
         self.startedAt = startedAt
         self.endedAt = endedAt
+        self.updatedAt = updatedAt
     }
 
     public var isActive: Bool { endedAt == nil }

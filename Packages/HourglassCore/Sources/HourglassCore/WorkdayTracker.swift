@@ -8,6 +8,7 @@ import Observation
 public final class WorkdayTracker {
     private let store: any WorkdayStoring
     private let clock: any PomodoroClock
+    private let stamps: any UpdateStamping
     private let calendar: Calendar
 
     /// Fired whenever a clock session is created or modified (in/out, breaks,
@@ -17,13 +18,23 @@ public final class WorkdayTracker {
     /// Fired when a clock session is deleted.
     public var onSessionDeleted: (@MainActor (ClockSession.ID) -> Void)?
 
+    /// Fired when a single break is deleted. Breaks sync as their own rows, and
+    /// a deletion erases its evidence from the parent session — without this,
+    /// nothing would carry the tombstone and the break would resurrect from the
+    /// server on the next pull.
+    public var onBreakDeleted: (@MainActor (ClockSession.ID, WorkBreak.ID) -> Void)?
+
     public init(
         store: any WorkdayStoring,
         clock: any PomodoroClock = SystemClock(),
+        stamps: (any UpdateStamping)? = nil,
         calendar: Calendar = .current
     ) {
         self.store = store
         self.clock = clock
+        // Defaults to the injected clock, so stamps stay deterministic under
+        // test clocks; the app swaps in the shared hybrid clock for sync.
+        self.stamps = stamps ?? WallClockStamps(wallClock: { clock.now })
         self.calendar = calendar
     }
 
@@ -51,7 +62,7 @@ public final class WorkdayTracker {
     public func clockIn() -> ClockSession? {
         closeStaleSessions()
         guard !isClockedIn else { return currentSession }
-        let session = ClockSession(clockedInAt: clock.now, updatedAt: clock.now)
+        let session = ClockSession(clockedInAt: clock.now, updatedAt: stamps.next())
         store.add(session)
         onSessionChanged?(session)
         return session
@@ -97,7 +108,7 @@ public final class WorkdayTracker {
     public func startBreak() {
         if !isClockedIn { clockIn() }
         guard var session = currentSession, !session.isOnBreak else { return }
-        session.breaks.append(WorkBreak(startedAt: clock.now))
+        session.breaks.append(WorkBreak(startedAt: clock.now, updatedAt: stamps.next()))
         persist(session)
     }
 
@@ -132,6 +143,8 @@ public final class WorkdayTracker {
     public func updateBreak(sessionID: ClockSession.ID, entry: WorkBreak) {
         guard var session = store.all().first(where: { $0.id == sessionID }),
               let index = session.breaks.firstIndex(where: { $0.id == entry.id }) else { return }
+        var entry = entry
+        entry.updatedAt = stamps.next()
         session.breaks[index] = entry
         persist(normalized(session))
     }
@@ -141,11 +154,12 @@ public final class WorkdayTracker {
               session.breaks.contains(where: { $0.id == entryID }) else { return }
         session.breaks.removeAll { $0.id == entryID }
         persist(normalized(session))
+        onBreakDeleted?(sessionID, entryID)
     }
 
     public func add(_ session: ClockSession) {
         var session = normalized(session)
-        session.updatedAt = clock.now
+        session.updatedAt = stamps.next()
         store.add(session)
         onSessionChanged?(session)
     }
@@ -157,6 +171,12 @@ public final class WorkdayTracker {
     /// Adopts a session mirrored from another device without echoing it back,
     /// unless what we hold is newer — a stale copy would silently undo a local
     /// edit.
+    ///
+    /// Only the clock stamps travel with the session row; breaks are their own
+    /// rows with their own stamps, applied through ``applyRemoteBreak``. The
+    /// local breaks are therefore always preserved here — a session-level
+    /// last-writer-wins that swallowed the breaks array is exactly how a stale
+    /// offline device used to erase a whole day's breaks.
     public func applyRemote(_ session: ClockSession) {
         guard let existing = store.all().first(where: { $0.id == session.id }) else {
             store.add(session)
@@ -165,6 +185,39 @@ public final class WorkdayTracker {
         let mine = existing.updatedAt ?? .distantPast
         let theirs = session.updatedAt ?? .distantPast
         guard theirs >= mine else { return }
+        var merged = session
+        merged.breaks = existing.breaks
+        store.update(merged)
+    }
+
+    /// Adopts one break from another device, last writer winning per break.
+    /// Returns false when the parent session isn't here yet, so the caller can
+    /// hold the row until it is — session and break rows travel independently.
+    @discardableResult
+    public func applyRemoteBreak(sessionID: ClockSession.ID, entry: WorkBreak) -> Bool {
+        guard var session = store.all().first(where: { $0.id == sessionID }) else { return false }
+        if let index = session.breaks.firstIndex(where: { $0.id == entry.id }) {
+            let mine = session.breaks[index].updatedAt ?? .distantPast
+            let theirs = entry.updatedAt ?? .distantPast
+            guard theirs >= mine else { return true }
+            session.breaks[index] = entry
+        } else {
+            session.breaks.append(entry)
+            session.breaks.sort { $0.startedAt < $1.startedAt }
+        }
+        store.update(session)
+        return true
+    }
+
+    /// Applies a break deletion from another device — unless our copy of the
+    /// break is newer than the deletion, which would mean the tombstone is
+    /// stale and the edit it would erase should stand.
+    public func deleteBreakLocally(sessionID: ClockSession.ID, entryID: WorkBreak.ID, unlessEditedAfter stamp: Date) {
+        guard var session = store.all().first(where: { $0.id == sessionID }),
+              let index = session.breaks.firstIndex(where: { $0.id == entryID }) else { return }
+        let mine = session.breaks[index].updatedAt ?? .distantPast
+        guard stamp >= mine else { return }
+        session.breaks.remove(at: index)
         store.update(session)
     }
 
@@ -175,7 +228,7 @@ public final class WorkdayTracker {
     /// Single write path, so every mutation notifies the sync layer.
     private func persist(_ session: ClockSession) {
         var session = session
-        session.updatedAt = clock.now
+        session.updatedAt = stamps.next()
         store.update(session)
         onSessionChanged?(session)
     }
@@ -194,6 +247,7 @@ public final class WorkdayTracker {
         session.clockedOutAt = end
         for index in session.breaks.indices where session.breaks[index].isActive {
             session.breaks[index].endedAt = end
+            session.breaks[index].updatedAt = stamps.next()
         }
         return session
     }
@@ -204,6 +258,7 @@ public final class WorkdayTracker {
         let end = instant ?? clock.now
         for index in session.breaks.indices where session.breaks[index].isActive {
             session.breaks[index].endedAt = end
+            session.breaks[index].updatedAt = stamps.next()
         }
     }
 }

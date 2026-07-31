@@ -1,0 +1,9 @@
+# Function deploy configuration (read by `supabase functions deploy`).
+#
+# claim-pairing MUST skip gateway JWT verification: the joining device is
+# signed out when it calls, and with new-format sb_publishable_* API keys the
+# Swift SDK sends no Authorization header at all — verification would 401
+# every pairing attempt before the handler runs. The function needs no caller
+# identity anyway: the single-use hashed code is the credential.
+[functions.claim-pairing]
+verify_jwt = false

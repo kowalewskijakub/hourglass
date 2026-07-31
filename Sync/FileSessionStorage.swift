@@ -20,10 +20,16 @@ struct FileSessionStorage: AuthLocalStorage {
 
     func store(key: String, value: Data) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = fileURL(for: key)
+        var url = fileURL(for: key)
         // Owner read/write only — no group or world access.
         try value.write(to: url, options: [.atomic, .completeFileProtection])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        // A refresh token restored onto a second machine from a backup would
+        // collide with the original's token family — and it's a credential;
+        // it has no business in a backup at all.
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
     }
 
     func retrieve(key: String) throws -> Data? {
