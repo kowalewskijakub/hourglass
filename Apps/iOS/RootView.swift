@@ -1,56 +1,54 @@
 import SwiftUI
 import HourglassCore
 
-/// The iOS tab bar: Timer, Stats, Settings (the log lives inside Settings).
+/// The iOS tab bar: Orbit, Stats (Overview / History) and Settings.
+///
+/// The Orbit tab is full bleed and follows the sky; everything else is a normal
+/// system surface following the system appearance.
 struct RootView: View {
     @Bindable var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var tab: Tab = .orbit
+    @State private var statsSection: StatisticsView.Section = .overview
+
+    enum Tab: Hashable { case orbit, stats, settings }
 
     var body: some View {
-        TabView {
-            TimerScreen(model: model)
-                .tabItem { Label("Timer", systemImage: "timer") }
+        TabView(selection: $tab) {
+            OrbitFaceView(
+                model: model,
+                openHistory: {
+                    statsSection = .history
+                    tab = .stats
+                },
+                openSettings: { tab = .settings }
+            )
+            .keepAwake(model.engine.isRunning)
+            .toolbarBackground(.visible, for: .tabBar)
+            .tabItem { Label("Orbit", systemImage: OrbitIcon.focus.symbolName) }
+            .tag(Tab.orbit)
 
             NavigationStack {
-                StatisticsView(model: model)
-                    .navigationTitle("Statistics")
+                StatisticsView(model: model, section: $statsSection)
+                    .navigationTitle("Stats")
             }
-            .tabItem { Label("Stats", systemImage: "chart.bar.fill") }
+            .tabItem { Label("Stats", systemImage: OrbitIcon.stats.symbolName) }
+            .tag(Tab.stats)
 
             NavigationStack {
                 SettingsFormView(model: model)
                     .navigationTitle("Settings")
             }
-            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            .tabItem { Label("Settings", systemImage: OrbitIcon.settings.symbolName) }
+            .tag(Tab.settings)
         }
-    }
-}
-
-/// The full-screen timer. The engine ticks drive per-second updates while in the
-/// foreground; `refresh()` on `scenePhase == .active` reconciles anything that
-/// elapsed while the app was suspended (the scheduled notification already
-/// alerted the user).
-struct TimerScreen: View {
-    @Bindable var model: AppModel
-    @Environment(\.scenePhase) private var scenePhase
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ClockBar(model: model)
-                .padding(.top, 8)
-            Spacer(minLength: 0)
-            TimerFaceView(
-                engine: model.engine,
-                sessionsUntilLongBreak: model.settings.sessionsUntilLongBreak
-            )
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(model.engine.kind.tint.opacity(0.06).ignoresSafeArea())
-        .keepAwake(model.engine.isRunning)
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
+            // Reconcile anything that elapsed while suspended: the engine
+            // against the wall clock, the linked break against the stores, and
+            // the server against both.
             model.engine.refresh()
-            // Realtime can miss events while backgrounded; reconcile on return.
+            model.refreshLinkedBreak()
             Task { await model.sync?.refresh() }
         }
     }

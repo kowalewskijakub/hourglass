@@ -22,6 +22,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Hourglass uses your approximate location only to know when the sun rises and sets where you are, so the Orbit scene can follow the local sky. It is never shared or synced, and the timer works exactly the same without it.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

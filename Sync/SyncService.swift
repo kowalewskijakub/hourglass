@@ -844,7 +844,7 @@ final class SyncService {
         }
         // applyRemote and deleteLocally deliberately skip the tracker's hooks
         // to avoid echoing the change back, so nudge the host directly.
-        model.onWorkdayChanged?()
+        model.remoteWorkdayDidChange()
     }
 
     private func applyRemoteWorkBreaks(_ rows: [WorkBreakRow]) {
@@ -865,7 +865,7 @@ final class SyncService {
                 }
             }
         }
-        model.onWorkdayChanged?()
+        model.remoteWorkdayDidChange()
     }
 
     private func flushOrphanBreaks(for sessionID: UUID) {

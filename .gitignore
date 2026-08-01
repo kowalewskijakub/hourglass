@@ -3,6 +3,7 @@
 *.xcworkspace/
 DerivedData/
 build/
+build-ios/
 .build/
 
 # macOS

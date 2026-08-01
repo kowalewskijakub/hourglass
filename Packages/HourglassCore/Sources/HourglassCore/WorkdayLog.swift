@@ -7,26 +7,29 @@ import Foundation
 /// these hang under, so a renderer never has to handle a case that can't occur.
 public enum LogEntry: Identifiable, Hashable, Sendable {
     case session(FocusSession)
-    case workBreak(sessionID: ClockSession.ID, entry: WorkBreak)
+    /// A rest interval. `source` names the Pomodoro phase that opened it, when
+    /// one did — derived from the phase record that covers the same stretch,
+    /// not from a second stored field.
+    case workBreak(sessionID: ClockSession.ID, entry: WorkBreak, source: SessionKind?)
 
     public var id: UUID {
         switch self {
         case .session(let s): return s.id
-        case .workBreak(_, let b): return b.id
+        case .workBreak(_, let b, _): return b.id
         }
     }
 
     public var startedAt: Date {
         switch self {
         case .session(let s): return s.startedAt
-        case .workBreak(_, let b): return b.startedAt
+        case .workBreak(_, let b, _): return b.startedAt
         }
     }
 
     public var duration: TimeInterval {
         switch self {
         case .session(let s): return s.plannedDuration
-        case .workBreak(_, let b): return b.duration()
+        case .workBreak(_, let b, _): return b.duration()
         }
     }
 
@@ -106,11 +109,47 @@ public struct WorkdayLog: Sendable {
     /// Everything flattened, newest first.
     public let timeline: [LogItem]
 
-    public init(clockSessions: [ClockSession], focusSessions: [FocusSession]) {
+    /// A break phase and the work break it opened are one rest interval, so the
+    /// log shows one row. The two records are matched by overlap rather than by
+    /// a stored link: that also covers days recorded before Pomodoro breaks were
+    /// linked to the workday, which have a phase record and no break interval
+    /// and must still appear.
+    ///
+    /// Deliberately generous — a device that noticed a completion late records
+    /// the phase against its real deadline while the break interval closed a few
+    /// seconds either side — but still requires the two to be substantially the
+    /// same stretch rather than merely adjacent.
+    private static func covers(_ entry: WorkBreak, _ session: FocusSession, now: Date) -> Bool {
+        guard session.kind.isBreak else { return false }
+        let breakEnd = entry.endedAt ?? now
+        let sessionEnd = session.endedAt ?? session.startedAt.addingTimeInterval(session.plannedDuration)
+        let overlap = min(breakEnd, sessionEnd).timeIntervalSince(max(entry.startedAt, session.startedAt))
+        guard overlap > 0 else { return false }
+        let shorter = min(
+            max(1, breakEnd.timeIntervalSince(entry.startedAt)),
+            max(1, sessionEnd.timeIntervalSince(session.startedAt))
+        )
+        return overlap / shorter >= 0.5
+    }
+
+    public init(clockSessions: [ClockSession], focusSessions: [FocusSession], now: Date = Date()) {
         // A session that was skipped or reset never happened as far as the log
         // is concerned.
         let recorded = focusSessions.filter(\.completed)
         let ordered = clockSessions.sorted { $0.clockedInAt > $1.clockedInAt }
+
+        // Which phase, if any, each rest interval belongs to. One pass over
+        // every break so both the nested view and the flat export agree.
+        var sourceOfBreak: [WorkBreak.ID: SessionKind] = [:]
+        var absorbedSessions: Set<FocusSession.ID> = []
+        for clockSession in clockSessions {
+            for entry in clockSession.breaks {
+                guard let phase = recorded.first(where: { Self.covers(entry, $0, now: now) }) else { continue }
+                sourceOfBreak[entry.id] = phase.kind
+                absorbedSessions.insert(phase.id)
+            }
+        }
+        let standalone = recorded.filter { !absorbedSessions.contains($0.id) }
 
         // Where each workday stops claiming. An open workday claims up to the
         // moment the next one opens — left unbounded it would claim every
@@ -122,11 +161,13 @@ public struct WorkdayLog: Sendable {
         }
 
         var children: [[LogEntry]] = ordered.map { clockSession in
-            clockSession.breaks.map { .workBreak(sessionID: clockSession.id, entry: $0) }
+            clockSession.breaks.map {
+                .workBreak(sessionID: clockSession.id, entry: $0, source: sourceOfBreak[$0.id])
+            }
         }
         var unassigned: [LogEntry] = []
 
-        for session in recorded {
+        for session in standalone {
             // Newest first, and the first match wins, so overlapping workdays
             // (two devices, or a manual edit) still claim a session exactly once.
             let owner = ordered.indices.first { index in
@@ -149,10 +190,12 @@ public struct WorkdayLog: Sendable {
         }
         self.workdays = workdays
 
-        var timeline: [LogItem] = recorded.map { .entry(.session($0)) }
+        var timeline: [LogItem] = standalone.map { .entry(.session($0)) }
         for clockSession in clockSessions {
             timeline.append(.workday(clockSession))
-            timeline += clockSession.breaks.map { .entry(.workBreak(sessionID: clockSession.id, entry: $0)) }
+            timeline += clockSession.breaks.map {
+                .entry(.workBreak(sessionID: clockSession.id, entry: $0, source: sourceOfBreak[$0.id]))
+            }
         }
         self.timeline = timeline.sorted { $0.startedAt > $1.startedAt }
     }

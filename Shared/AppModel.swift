@@ -13,6 +13,10 @@ final class AppModel {
     let historyStore: FileHistoryStore
     let engine: PomodoroEngine
     let workday: WorkdayTracker
+    /// Keeps a Pomodoro break and the workday's rest interval the same thing.
+    let coordinator: PomodoroWorkdayCoordinator
+    /// Decides the Orbit sky. Optional by construction — nothing else waits on it.
+    let daylight = DaylightProvider()
     /// One stamp order for the whole device: every `updatedAt` the engine, the
     /// tracker, the log editors or the sync layer issue comes from here, so
     /// last-writer-wins compares one consistent sequence — and never falls
@@ -29,9 +33,16 @@ final class AppModel {
         self.settingsStore = settings
         self.historyStore = history
         self.stamps = stamps
-        self.engine = PomodoroEngine(settingsStore: settings, history: history, clock: SystemClock(), stamps: stamps)
-        self.workday = WorkdayTracker(store: workdays, stamps: stamps)
+        let engine = PomodoroEngine(settingsStore: settings, history: history, clock: SystemClock(), stamps: stamps)
+        let workday = WorkdayTracker(store: workdays, stamps: stamps)
+        self.engine = engine
+        self.workday = workday
+        self.coordinator = PomodoroWorkdayCoordinator(engine: engine, workday: workday)
         installEngineHooks()
+        // A launch can land mid-break: the stores remember the interval, the
+        // coordinator does not, and adopting it here is what stops a second one
+        // opening the first time anything changes.
+        coordinator.reconcile()
     }
 
     // MARK: - Engine callbacks
@@ -69,19 +80,26 @@ final class AppModel {
             onWorkdayChanged?()
         }
 
+        // Every engine announcement is followed by one reconciliation, because a
+        // phase changing is exactly when the workday might need to start or stop
+        // resting. Reconciling is idempotent, so announcing twice costs nothing.
         engine.onSessionStarted = { [weak self] kind, secondsRemaining in
             guard let self else { return }
             workday.sessionStarted(kind: kind)
+            coordinator.reconcile()
             sync?.pushLiveState()
             onSessionStarted?(kind, secondsRemaining)
         }
         engine.onSessionInterrupted = { [weak self] ended in
             guard let self else { return }
+            coordinator.reconcile()
             sync?.pushLiveState()
             onSessionInterrupted?(ended)
         }
         engine.onSessionCompleted = { [weak self] session in
             guard let self else { return }
+            // Before the push, so the linked work break is part of what mirrors.
+            coordinator.reconcile()
             // Both devices run the countdown, so both arrive here, and both
             // push — under the session id the live state carried, so the
             // copies upsert into one row instead of landing twice. (The old
@@ -120,6 +138,10 @@ final class AppModel {
             pausedAt: pausedAt,
             sessionID: sessionID
         )
+        // A phase adopted from elsewhere needs the same linking a local one gets:
+        // the other device's break is this device's work break too.
+        coordinator.reconcile()
+
         switch adoption {
         case .startedRunning(let kind, let remaining):
             onSessionStarted?(kind, remaining)
@@ -130,6 +152,21 @@ final class AppModel {
         case .unchanged:
             break
         }
+    }
+
+    /// Clock sessions or breaks arrived from another device. They are written
+    /// straight to the store — deliberately skipping the tracker's hooks — so
+    /// this is where the linked break is re-derived and the hosts are told.
+    func remoteWorkdayDidChange() {
+        coordinator.reconcile()
+        onWorkdayChanged?()
+    }
+
+    /// Re-derive the linked break after anything that could have changed the
+    /// stores behind the app's back: returning to the foreground, waking, or a
+    /// sync reconciliation.
+    func refreshLinkedBreak() {
+        coordinator.reconcile()
     }
 
     /// Bindable settings that persist on every change (and sync to other devices).
@@ -179,6 +216,67 @@ final class AppModel {
     func netWorkedToday(now: Date = Date()) -> TimeInterval {
         calculator.netWorkedTime(in: workday.sessions(), on: now, asOf: now)
     }
+
+    func netWorkedYesterday(now: Date = Date()) -> TimeInterval {
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: now) else { return 0 }
+        return calculator.netWorkedTime(in: workday.sessions(), on: yesterday, asOf: now)
+    }
+
+    /// The stretches of today actually spent working, for the Orbit day trace.
+    func workedStretches(now: Date = Date()) -> [StatisticsCalculator.WorkedStretch] {
+        calculator.workedStretches(in: workday.sessions(), on: now, asOf: now)
+    }
+
+    // MARK: - Orbit presentation
+    //
+    // One snapshot, one resolver, every surface. The phone, the panel, the
+    // status item and the Live Activity all read the result rather than each
+    // working out for itself what "24:53" means or whether Break belongs on
+    // screen — which is the only reason they cannot contradict each other.
+
+    func orbitSnapshot(now: Date = Date(), surface: OrbitSurface) -> OrbitSnapshot {
+        let session = workday.currentSession
+        let lastBreakEnded = session?.breaks.compactMap(\.endedAt).max()
+
+        return OrbitSnapshot(
+            now: now,
+            workday: coordinator.workdayState,
+            pomodoro: coordinator.pomodoroState,
+            clockedInAt: session?.clockedInAt,
+            netWorkedToday: netWorkedToday(now: now),
+            // Nil rather than zero when the day has had no rest yet: "Last break
+            // · 0m ago" would be a lie, and the pill says "No break yet" instead.
+            timeSinceLastBreak: lastBreakEnded.map { max(0, now.timeIntervalSince($0)) },
+            pausedAt: engine.pausedAt,
+            focusesCompletedInCycle: engine.focusesCompletedInCycle,
+            sessionsUntilLongBreak: settings.sessionsUntilLongBreak,
+            nextPhaseKind: PomodoroEngine.kind(
+                at: engine.cyclePosition + 1,
+                sessionsUntilLongBreak: settings.sessionsUntilLongBreak
+            ),
+            nextFocusDuration: settings.focusDuration,
+            yesterdayWorked: nonZero(netWorkedYesterday(now: now)),
+            surface: surface,
+            locale: .autoupdatingCurrent,
+            calendar: calendar
+        )
+    }
+
+    func orbitPresentation(now: Date = Date(), surface: OrbitSurface) -> OrbitPresentation {
+        OrbitPresentationResolver.resolve(orbitSnapshot(now: now, surface: surface))
+    }
+
+    private func nonZero(_ interval: TimeInterval) -> TimeInterval? {
+        interval > 60 ? interval : nil
+    }
+
+    // MARK: - Orbit intent
+
+    func perform(_ action: OrbitAction) { coordinator.perform(action) }
+    func startManualBreak() { coordinator.startManualBreak() }
+    /// Leave the timer without ending the working day.
+    func endPomodoro() { coordinator.endPomodoro() }
+    func clockOut() { coordinator.clockOut() }
 
     // MARK: - Log (unified, editable timeline)
 

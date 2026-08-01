@@ -28,6 +28,9 @@ public final class PomodoroEngine {
     public private(set) var phase: Phase = .idle
     /// Seconds remaining in the current session.
     public private(set) var remaining: TimeInterval
+    /// When the current session was frozen, so the UI can say *when* the pause
+    /// began rather than only that it did. Nil unless `phase == .paused`.
+    public private(set) var pausedAt: Date?
 
     // MARK: Dependencies
 
@@ -152,6 +155,7 @@ public final class PomodoroEngine {
         currentSessionStart = now
         currentSessionID = UUID() // a fresh identity, shared via the live state
         isMirroring = false // started here
+        pausedAt = nil
         phase = .running
         scheduleTicks()
         onSessionStarted?(kind, remaining)
@@ -161,6 +165,7 @@ public final class PomodoroEngine {
         guard phase == .running else { return }
         recomputeRemaining()
         clock.cancel()
+        pausedAt = clock.now
         phase = .paused
         onSessionInterrupted?(false) // paused, can resume
     }
@@ -168,6 +173,7 @@ public final class PomodoroEngine {
     public func resume() {
         guard phase == .paused else { return }
         endDate = clock.now.addingTimeInterval(remaining)
+        pausedAt = nil
         phase = .running
         scheduleTicks()
         onSessionStarted?(kind, remaining)
@@ -177,6 +183,22 @@ public final class PomodoroEngine {
     public func reset() {
         let abandoned = stopTimekeeping()
         phase = .idle
+        remaining = plannedDuration
+        if abandoned { onSessionInterrupted?(true) }
+    }
+
+    /// Stop the Pomodoro entirely and return to the start of the cycle.
+    ///
+    /// Distinct from ``reset()``, which keeps the position: this is how a
+    /// caller says "no phase exists any more". Clocking out uses it, because a
+    /// staged phase left behind would keep every surface describing a Pomodoro
+    /// the user has finished with — and would keep the manual Break action
+    /// hidden on a day that no longer has a timer in it.
+    public func endCycle() {
+        let abandoned = stopTimekeeping()
+        cyclePosition = 0
+        phase = .idle
+        pausedAt = nil
         remaining = plannedDuration
         if abandoned { onSessionInterrupted?(true) }
     }
@@ -247,11 +269,13 @@ public final class PomodoroEngine {
                 phase = .idle
                 self.remaining = plannedDuration
                 currentSessionID = nil
+                self.pausedAt = nil
                 isMirroring = false
                 return wasActive ? .stopped : .unchanged
             }
             self.endDate = endDate
             self.remaining = remaining
+            self.pausedAt = nil
             if currentSessionStart == nil { currentSessionStart = clock.now }
             if let sessionID { currentSessionID = sessionID }
             isMirroring = !ownsCurrentSession
@@ -274,12 +298,16 @@ public final class PomodoroEngine {
             }
             if let sessionID { currentSessionID = sessionID }
             isMirroring = !ownsCurrentSession
+            // The peer's freeze instant, so "paused since" reads the same on
+            // both devices rather than restarting at this device's clock.
+            self.pausedAt = pausedAt
             phase = .paused
             return previousPhase == .paused ? .unchanged : .paused
         } else {
             self.endDate = nil
             currentSessionStart = nil
             currentSessionID = nil
+            self.pausedAt = nil
             phase = .idle
             remaining = plannedDuration
             isMirroring = false
@@ -329,6 +357,7 @@ public final class PomodoroEngine {
         endDate = nil
         currentSessionStart = nil
         currentSessionID = nil
+        pausedAt = nil
         isMirroring = false // torn down; the next start decides ownership afresh
         return wasActive
     }

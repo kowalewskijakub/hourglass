@@ -154,4 +154,79 @@ import Foundation
     @Test func exportOfAnEmptyLogIsJustTheHeader() {
         #expect(WorkdayLog(clockSessions: [], focusSessions: []).exportCSV() == "type,start,end,duration_minutes")
     }
+
+    // MARK: One rest, one row
+    //
+    // A Pomodoro break now leaves two records: the phase the engine finished and
+    // the work-break interval the coordinator opened for it. They are the same
+    // rest, so History must show it once — named by the phase that caused it.
+
+    private func breakSession(at start: Date, minutes: Double, kind: SessionKind) -> FocusSession {
+        FocusSession(
+            kind: kind,
+            plannedDuration: minutes * 60,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(minutes * 60),
+            completed: true
+        )
+    }
+
+    @Test func aPomodoroBreakAndItsWorkBreakBecomeOneRow() {
+        let entry = WorkBreak(startedAt: at(11), endedAt: at(11.0 + 5.0 / 60))
+        let workday = ClockSession(clockedInAt: at(9), clockedOutAt: at(17), breaks: [entry])
+        let phase = breakSession(at: at(11), minutes: 5, kind: .shortBreak)
+        let log = WorkdayLog(clockSessions: [workday], focusSessions: [focus(at: at(10)), phase])
+
+        let children = log.workdays[0].children
+        // The focus and the one rest — not the rest twice.
+        #expect(children.count == 2)
+        #expect(sessionIDs(of: log.workdays[0]).count == 1)
+
+        guard let rest = children.first(where: {
+            if case .workBreak = $0 { return true } else { return false }
+        }), case .workBreak(_, let stored, let source) = rest else {
+            Issue.record("expected one work-break row"); return
+        }
+        #expect(stored.id == entry.id)
+        #expect(source == .shortBreak)
+    }
+
+    /// A day recorded before Pomodoro breaks were linked has the phase record and
+    /// no interval; dropping it would make old rests vanish from History.
+    @Test func aBreakPhaseWithNoLinkedIntervalStillAppears() {
+        let workday = ClockSession(clockedInAt: at(9), clockedOutAt: at(17))
+        let phase = breakSession(at: at(11), minutes: 5, kind: .longBreak)
+        let log = WorkdayLog(clockSessions: [workday], focusSessions: [phase])
+
+        #expect(log.workdays[0].children.count == 1)
+        #expect(sessionIDs(of: log.workdays[0]) == [phase.id])
+    }
+
+    /// A manual break has no phase covering it and keeps its own row, unnamed.
+    @Test func aManualBreakKeepsItsRowAndHasNoSource() {
+        let entry = WorkBreak(startedAt: at(11), endedAt: at(11.5))
+        let workday = ClockSession(clockedInAt: at(9), clockedOutAt: at(17), breaks: [entry])
+        let phase = breakSession(at: at(14), minutes: 5, kind: .shortBreak)
+        let log = WorkdayLog(clockSessions: [workday], focusSessions: [phase])
+
+        let children = log.workdays[0].children
+        #expect(children.count == 2, "an unrelated phase must not absorb this rest")
+        guard case .workBreak(_, _, let source) = children.first(where: {
+            if case .workBreak = $0 { return true } else { return false }
+        })! else { Issue.record("expected a work-break row"); return }
+        #expect(source == nil)
+    }
+
+    @Test func theExportAlsoListsALinkedRestOnlyOnce() {
+        let entry = WorkBreak(startedAt: at(11), endedAt: at(11.0 + 5.0 / 60))
+        let workday = ClockSession(clockedInAt: at(9), clockedOutAt: at(17), breaks: [entry])
+        let phase = breakSession(at: at(11), minutes: 5, kind: .shortBreak)
+        let log = WorkdayLog(clockSessions: [workday], focusSessions: [focus(at: at(10)), phase])
+
+        let kinds = log.exportCSV()
+            .split(separator: "\n")
+            .dropFirst()
+            .map { $0.split(separator: ",")[0] }
+        #expect(kinds == ["workday", "focus", "break"])
+    }
 }

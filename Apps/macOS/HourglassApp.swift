@@ -27,7 +27,6 @@ final class MacAppController: NSObject, NSApplicationDelegate {
 
     private var mainWindow: NSWindow?
     private var statsWindow: NSWindow?
-    private var logWindow: NSWindow?
     private var settingsWindow: NSWindow?
 
     private var lastAppliedMode: MacAppMode?
@@ -59,7 +58,7 @@ final class MacAppController: NSObject, NSApplicationDelegate {
         )
         activityWatcher.start()
 
-        statusItemController = StatusItemController(engine: model.engine) { [weak self] in
+        statusItemController = StatusItemController(model: model) { [weak self] in
             guard let self else { return AnyView(EmptyView()) }
             return AnyView(HourglassPanel(model: model, controller: self))
         }
@@ -86,6 +85,10 @@ final class MacAppController: NSObject, NSApplicationDelegate {
     }
 
     private func reconcileSync() {
+        // The Mac may have slept through a phase change; re-derive the linked
+        // break from the stores before asking the server for anything.
+        model.engine.refresh()
+        model.refreshLinkedBreak()
         guard let sync else { return }
         Task { await sync.refresh() }
     }
@@ -98,23 +101,20 @@ final class MacAppController: NSObject, NSApplicationDelegate {
 
     // MARK: Actions (from the panel)
 
-    func toggleTimer() { model.engine.toggle() }
-
     func openMainWindow() {
         present(&mainWindow, title: "Hourglass", content: AnyView(HourglassPanel(model: model, controller: self)))
     }
 
+    /// One Stats window with both jobs in it. History is a segment of Stats, not
+    /// a window of its own and not a row in Settings, so `openHistory` opens the
+    /// same window — the segment inside it is the user's to choose.
     func openStats() {
-        present(&statsWindow, title: "Statistics", size: NSSize(width: 620, height: 560),
+        present(&statsWindow, title: "Stats", size: NSSize(width: 620, height: 560),
                 minSize: NSSize(width: 460, height: 420),
-                content: AnyView(StatisticsView(model: model)))
+                content: AnyView(NavigationStack { StatisticsView(model: model) }))
     }
 
-    func openLog() {
-        present(&logWindow, title: "Log", size: NSSize(width: 520, height: 620),
-                minSize: NSSize(width: 400, height: 360),
-                content: AnyView(NavigationStack { LogView(model: model) }))
-    }
+    func openHistory() { openStats() }
 
     func openSettings() {
         present(&settingsWindow, title: "Settings", size: NSSize(width: 500, height: 620),

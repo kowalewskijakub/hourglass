@@ -36,6 +36,9 @@ public struct TimerSettings: Codable, Sendable, Equatable {
     public var clockInReminderMinute: Int
     /// macOS: nudge to clock in when you're active at the machine while clocked out.
     public var activityNudgeEnabled: Bool
+    /// Which sky the Orbit scene shows. Affects the Orbit scene only — Stats,
+    /// History, Settings and every sheet follow the system appearance.
+    public var skyMode: SkyMode
 
     public init(
         focusDuration: TimeInterval = 25 * 60,
@@ -51,7 +54,8 @@ public struct TimerSettings: Codable, Sendable, Equatable {
         clockInReminderEnabled: Bool = false,
         clockInReminderHour: Int = 9,
         clockInReminderMinute: Int = 0,
-        activityNudgeEnabled: Bool = false
+        activityNudgeEnabled: Bool = false,
+        skyMode: SkyMode = .followSun
     ) {
         self.focusDuration = focusDuration
         self.shortBreakDuration = shortBreakDuration
@@ -67,6 +71,7 @@ public struct TimerSettings: Codable, Sendable, Equatable {
         self.clockInReminderHour = min(23, max(0, clockInReminderHour))
         self.clockInReminderMinute = min(59, max(0, clockInReminderMinute))
         self.activityNudgeEnabled = activityNudgeEnabled
+        self.skyMode = skyMode
     }
 
     /// The default Pomodoro configuration (25 / 5 / 15, long break every 4).
@@ -99,5 +104,9 @@ public struct TimerSettings: Codable, Sendable, Equatable {
         clockInReminderHour = try c.decodeIfPresent(Int.self, forKey: .clockInReminderHour) ?? d.clockInReminderHour
         clockInReminderMinute = try c.decodeIfPresent(Int.self, forKey: .clockInReminderMinute) ?? d.clockInReminderMinute
         activityNudgeEnabled = try c.decodeIfPresent(Bool.self, forKey: .activityNudgeEnabled) ?? d.activityNudgeEnabled
+        // Added after the first sync protocol shipped: a payload written by an
+        // older peer has no sky at all and must still decode, and an unknown
+        // value from a newer one must not throw away the rest of the settings.
+        skyMode = (try? c.decodeIfPresent(SkyMode.self, forKey: .skyMode)) ?? d.skyMode
     }
 }

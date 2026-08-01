@@ -131,6 +131,57 @@ public struct StatisticsCalculator: Sendable {
         max(0, grossTime(in: all, on: day, asOf: now) - breakTime(in: all, on: day, asOf: now))
     }
 
+    // MARK: The shape of one day, as stretches of actual work
+
+    /// One uninterrupted stretch of recorded work.
+    public struct WorkedStretch: Sendable, Equatable, Hashable, Identifiable {
+        public let start: Date
+        public let end: Date
+        public var id: Date { start }
+        public var duration: TimeInterval { max(0, end.timeIntervalSince(start)) }
+    }
+
+    /// The stretches of `day` actually spent working — clocked-in time with the
+    /// breaks cut out of it, clipped to the day and to `now`.
+    ///
+    /// This is what the Orbit scene traces: solid arcs are these stretches and
+    /// the gaps between them are the rests. Pure, so the ambient scene and the
+    /// day-span chart cannot disagree about the same day.
+    public func workedStretches(
+        in all: [ClockSession],
+        on day: Date,
+        asOf now: Date
+    ) -> [WorkedStretch] {
+        guard let dayInterval = calendar.dateInterval(of: .day, for: day) else { return [] }
+        let ceiling = min(now, dayInterval.end)
+
+        var stretches: [WorkedStretch] = []
+        for session in all {
+            let sessionStart = max(session.clockedInAt, dayInterval.start)
+            let sessionEnd = min(session.clockedOutAt ?? now, ceiling)
+            guard sessionEnd > sessionStart else { continue }
+
+            // Walk the breaks in order, emitting the work between them.
+            var cursor = sessionStart
+            let rests = session.breaks
+                .map { (start: $0.startedAt, end: min($0.endedAt ?? sessionEnd, sessionEnd)) }
+                .filter { $0.end > sessionStart && $0.start < sessionEnd }
+                .sorted { $0.start < $1.start }
+
+            for rest in rests {
+                let restStart = max(rest.start, sessionStart)
+                if restStart > cursor {
+                    stretches.append(WorkedStretch(start: cursor, end: restStart))
+                }
+                cursor = max(cursor, min(rest.end, sessionEnd))
+            }
+            if sessionEnd > cursor {
+                stretches.append(WorkedStretch(start: cursor, end: sessionEnd))
+            }
+        }
+        return stretches.sorted { $0.start < $1.start }
+    }
+
     /// A day's worked time alongside how much of it was spent in Pomodoro focus.
     public struct DailyWorkStat: Sendable, Identifiable, Hashable {
         public let date: Date

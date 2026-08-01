@@ -1,15 +1,21 @@
 import SwiftUI
 import HourglassCore
 
-/// The unified, editable history: Pomodoro sessions, clocked-in stretches and
-/// non-Pomodoro breaks, grouped by day. Shared by the macOS Log window and the
-/// iOS Settings → Session Log screen.
+/// The unified, editable history: focus sessions, clocked-in stretches and the
+/// rests inside them, grouped by day. Hosted as the History segment of Stats on
+/// both platforms.
 struct LogView: View {
     @Bindable var model: AppModel
+    /// Owned by Stats, so the Add button can live in one unchanging toolbar
+    /// rather than appearing when this segment does — which resized the macOS
+    /// window every time the user switched segments.
+    @Binding var isAdding: Bool
     @State private var editingSession: FocusSession?
     @State private var editingClock: ClockSession?
     @State private var editingBreak: BreakEdit?
-    @State private var isAdding = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: OrbitPalette { .system(colorScheme) }
 
     var body: some View {
         let workdays = model.log.workdays
@@ -28,27 +34,26 @@ struct LogView: View {
                             // workday, indented under it.
                             ForEach(group.children) { child in
                                 row(for: child)
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparatorTint(palette.hairline)
                             }
                         } header: {
                             if let clockSession = group.clockSession {
                                 workdayHeader(clockSession)
                             } else {
                                 Text("Outside a workday")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(palette.inkSecondary)
                             }
                         }
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
-        .navigationTitle("Log")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Add", systemImage: "plus") { isAdding = true }
-            }
-            ToolbarItem(placement: .automatic) {
-                LogExportButton(model: model)
-            }
-        }
+        // No title and no toolbar of its own: History is a segment of Stats,
+        // not a screen the user navigated into, and Stats owns both.
         .sheet(item: $editingSession) { session in
             SessionEditView(session: session, onSave: model.updateSession)
         }
@@ -84,20 +89,19 @@ struct LogView: View {
     /// A workday section header — the container the nested items belong to.
     private func workdayHeader(_ session: ClockSession) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: session.isActive ? "clock.badge.checkmark" : "clock")
-                .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(dayTitle(session.clockedInAt))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(palette.ink)
                 Text(clockRange(session))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(palette.inkSecondary)
             }
             Spacer()
             Text(TimeFormatting.humanDuration(session.netDuration()))
-                .font(.caption.weight(.medium))
+                .font(.system(size: 11, weight: .semibold))
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.inkSecondary)
         }
         .textCase(nil)
         .padding(.vertical, 2)
@@ -111,35 +115,57 @@ struct LogView: View {
         }
     }
 
+    /// Focus rows are ember; every work break — Pomodoro or manual — is stone,
+    /// because they are the same kind of interval in the totals above. A break
+    /// phase and the rest it opened are one row, named by its source.
     @ViewBuilder
     private func row(for child: LogEntry) -> some View {
         switch child {
         case .session(let session):
             LogRow(
-                icon: session.kind.symbolName,
                 tint: session.kind.tint,
-                title: session.kind.displayName,
-                subtitle: session.startedAt.formatted(date: .omitted, time: .shortened),
-                trailing: TimeFormatting.humanDuration(session.plannedDuration)
+                title: "\(session.kind.displayName) · \(TimeFormatting.humanDuration(session.plannedDuration))",
+                subtitle: session.kind.isBreak ? breakSource(session.kind) : nil,
+                range: range(from: session.startedAt, duration: session.plannedDuration)
             )
             .modifier(LogRowActions(
                 edit: { editingSession = session },
                 delete: { model.deleteSession(id: session.id) }
             ))
 
-        case .workBreak(let sessionID, let entry):
+        case .workBreak(let sessionID, let entry, let source):
             LogRow(
-                icon: "cup.and.saucer",
-                tint: .orange,
-                title: "Break",
-                subtitle: entry.startedAt.formatted(date: .omitted, time: .shortened),
-                trailing: TimeFormatting.humanDuration(entry.duration())
+                tint: SessionKind.shortBreak.tint,
+                title: "\(breakTitle(source)) · \(TimeFormatting.humanDuration(entry.duration()))",
+                subtitle: breakSource(source),
+                range: range(from: entry.startedAt, duration: entry.duration())
             )
             .modifier(LogRowActions(
                 edit: { editingBreak = BreakEdit(sessionID: sessionID, entry: entry) },
                 delete: { model.deleteBreak(sessionID: sessionID, entryID: entry.id) }
             ))
         }
+    }
+
+    private func breakTitle(_ source: SessionKind?) -> String {
+        switch source {
+        case .shortBreak: return String(localized: "Short break")
+        case .longBreak: return String(localized: "Long break")
+        default: return String(localized: "Break")
+        }
+    }
+
+    private func breakSource(_ source: SessionKind?) -> String {
+        switch source {
+        case .shortBreak: return String(localized: "Pomodoro short break")
+        case .longBreak: return String(localized: "Pomodoro long break")
+        default: return String(localized: "Manual break")
+        }
+    }
+
+    private func range(from start: Date, duration: TimeInterval) -> String {
+        let end = start.addingTimeInterval(duration)
+        return "\(TimeFormatting.timeOfDay(start))–\(TimeFormatting.timeOfDay(end))"
     }
 
     private func clockRange(_ session: ClockSession) -> String {
@@ -162,29 +188,37 @@ private struct BreakEdit: Identifiable {
     var id: UUID { entry.id }
 }
 
+/// A state dot, the title and duration, optional source metadata, and the time
+/// range on the trailing edge.
 private struct LogRow: View {
-    let icon: String
     let tint: Color
     let title: String
-    let subtitle: String
-    let trailing: String
+    let subtitle: String?
+    let range: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundStyle(tint)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Circle()
+                .fill(tint)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
-            Spacer()
-            Text(trailing)
+            Spacer(minLength: 8)
+            Text(range)
+                .font(.system(size: 10.5))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

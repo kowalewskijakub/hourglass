@@ -163,4 +163,32 @@ import Observation
         #expect(decoded.shortBreakDuration == TimerSettings.default.shortBreakDuration)
         #expect(decoded.sessionsUntilLongBreak == TimerSettings.default.sessionsUntilLongBreak)
     }
+
+    // MARK: Sky mode — added after the sync protocol shipped
+
+    @Test func settingsWithoutASkyDecodeToFollowTheSun() throws {
+        let json = #"{"focusDuration": 600, "autoStartBreaks": true}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(TimerSettings.self, from: json)
+        #expect(decoded.skyMode == .followSun)
+        #expect(decoded.autoStartBreaks)
+    }
+
+    @Test func skyModeSurvivesARoundTrip() throws {
+        var settings = TimerSettings.default
+        settings.skyMode = .alwaysNight
+        let decoded = try JSONDecoder().decode(
+            TimerSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded == settings)
+    }
+
+    /// A sky written by a *newer* peer must not cost this device the rest of its
+    /// settings — an unknown value falls back rather than failing the payload.
+    @Test func anUnknownSkyDoesNotDiscardTheOtherSettings() throws {
+        let json = #"{"focusDuration": 600, "skyMode": "eclipse", "soundEnabled": false}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(TimerSettings.self, from: json)
+        #expect(decoded.skyMode == .followSun)
+        #expect(decoded.focusDuration == 600)
+        #expect(decoded.soundEnabled == false)
+    }
 }

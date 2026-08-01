@@ -3,6 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "HourglassCore",
+    // The core owns every user-visible string the Orbit surfaces show, so it
+    // carries the strings catalog the app targets localize against.
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
         .iOS(.v17),
@@ -14,6 +17,9 @@ let package = Package(
     targets: [
         .target(
             name: "HourglassCore",
+            resources: [
+                .process("Resources"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

@@ -112,8 +112,10 @@ import Foundation
         #expect(tracker.currentSession?.breakDuration() == 300)
     }
 
-    /// A break timer ends a coffee break too, without clocking in on its own.
-    @Test func startingABreakTimerEndsARunningBreak() {
+    /// A Pomodoro break is a work break, so starting one leaves the running rest
+    /// interval open rather than closing it underneath the user — the reverse of
+    /// what a *focus* timer does.
+    @Test func startingABreakTimerLeavesARunningBreakOpen() {
         let (tracker, _, clock) = makeTracker()
         tracker.clockIn()
         tracker.startBreak()
@@ -121,8 +123,8 @@ import Foundation
         clock.jump(by: 120)
         tracker.sessionStarted(kind: .longBreak)
 
-        #expect(tracker.isOnBreak == false)
-        #expect(tracker.currentSession?.breakDuration() == 120)
+        #expect(tracker.isOnBreak)
+        #expect(tracker.currentSession?.breaks.count == 1)
     }
 
     @Test func focusSessionWhileAlreadyClockedInDoesNotStartASecondSession() {

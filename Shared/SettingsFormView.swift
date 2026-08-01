@@ -8,16 +8,8 @@ struct SettingsFormView: View {
 
     var body: some View {
         Form {
-            #if os(iOS)
-            Section {
-                NavigationLink {
-                    LogView(model: model)
-                } label: {
-                    Label("Session Log", systemImage: "list.bullet.rectangle")
-                }
-            }
-            #endif
-
+            // The log is no longer reachable from here: History is a segment of
+            // Stats, alongside the numbers it explains.
             Section("Durations") {
                 minuteStepper("Focus", keyPath: \.focusDuration, range: 1...90)
                 minuteStepper("Short break", keyPath: \.shortBreakDuration, range: 1...30)
@@ -39,7 +31,7 @@ struct SettingsFormView: View {
                 Toggle("Show a notification", isOn: $model.settings.notificationsEnabled)
             }
 
-            Section("Workday") {
+            Section {
                 Toggle("Remind me to clock in", isOn: $model.settings.clockInReminderEnabled)
                 if model.settings.clockInReminderEnabled {
                     DatePicker("Remind at", selection: reminderTime, displayedComponents: .hourAndMinute)
@@ -47,6 +39,18 @@ struct SettingsFormView: View {
                 #if os(macOS)
                 Toggle("Nudge me when I'm active but clocked out", isOn: $model.settings.activityNudgeEnabled)
                 #endif
+
+                Picker("Sky", selection: $model.settings.skyMode) {
+                    Text("Follow the sun").tag(SkyMode.followSun)
+                    Text("Always night").tag(SkyMode.alwaysNight)
+                    Text("Always day").tag(SkyMode.alwaysDay)
+                }
+            } header: {
+                Text("Workday")
+            } footer: {
+                // Said plainly, because the obvious reading of a "sky" setting
+                // is that it changes the whole app's appearance. It does not.
+                Text("Sky changes the Orbit scene only. Stats, History and Settings follow your system appearance. Following the sun uses your approximate location; if it isn't available, Hourglass uses a 6:00–18:00 day.\n\nEarth imagery: NASA Visible Earth — Blue Marble and Black Marble.")
             }
 
             if let sync = model.sync {
@@ -63,6 +67,9 @@ struct SettingsFormView: View {
             #endif
         }
         .formStyle(.grouped)
+        // The same page surface as Stats and History, so the three
+        // information screens plainly come from one app.
+        .orbitInformationSurface()
     }
 
     /// Bridges the stored hour/minute to a `DatePicker`.

@@ -2,170 +2,231 @@ import SwiftUI
 import Charts
 import HourglassCore
 
-/// Focus statistics — leads with time actually worked, then how much of it was
-/// spent in Pomodoros, then the shape of the working day.
+/// Stats: two jobs behind one native switch. **Overview** is the shape of the
+/// work — today's total, the focus inside it, the week, and the span of each
+/// day. **History** is the record itself, still fully editable and exportable.
+///
+/// This surface follows the *system* appearance. Only the Orbit scene follows
+/// the sky, so a sunset never flips the information UI underneath the user.
 struct StatisticsView: View {
     var model: AppModel
 
-    private var workStats: [StatisticsCalculator.DailyWorkStat] { model.dailyWorkStats() }
-    private var clockSpans: [StatisticsCalculator.DailyClockSpan] { model.dailyClockSpans() }
+    enum Section: String, CaseIterable, Hashable {
+        case overview
+        case history
 
-    /// Both charts are pinned to this range. The day-shape chart only draws
-    /// bars for days you actually clocked in, so without a fixed domain a
-    /// single day would stretch across the whole plot and stop lining up with
-    /// the week above it.
-    private var dayDomain: ClosedRange<Date> {
-        let days = workStats.map(\.date) + clockSpans.map(\.date)
-        guard let first = days.min(), let last = days.max() else {
-            return Date()...Date().addingTimeInterval(86_400)
+        var title: LocalizedStringKey {
+            switch self {
+            case .overview: return "Overview"
+            case .history: return "History"
+            }
         }
-        return first...last.addingTimeInterval(86_400)
     }
 
-    /// A normal 5:00–23:00 day, stretched only as far as the data needs — an
-    /// early start, or a stretch that ran to midnight, would otherwise be
-    /// drawn off the plot.
-    private var hourDomain: ClosedRange<Double> {
-        let starts = clockSpans.compactMap(\.startHour)
-        let ends = clockSpans.compactMap(\.endHour)
-        return min(5, starts.min() ?? 5)...max(23, ends.max() ?? 23)
+    /// The iOS tab bar drives the selection so overflow → History can land on
+    /// the right segment; the macOS window has no such state and keeps its own.
+    init(model: AppModel, section: Binding<Section>? = nil) {
+        self.model = model
+        self.externalSection = section
     }
+
+    private let externalSection: Binding<Section>?
+    @State private var localSection: Section = .overview
+    @State private var isAdding = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var section: Binding<Section> { externalSection ?? $localSection }
+    private var palette: OrbitPalette { .system(colorScheme) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                headline
-                workChart
-                dayShapeChart
+        VStack(spacing: 0) {
+            Picker("View", selection: section) {
+                ForEach(Section.allCases, id: \.self) { section in
+                    Text(section.title).tag(section)
+                }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 14)
+
+            switch section.wrappedValue {
+            case .overview:
+                OverviewView(model: model)
+            case .history:
+                LogView(model: model, isAdding: $isAdding)
+            }
+        }
+        .orbitInformationSurface()
+        // The toolbar is identical in both segments on purpose: it used to gain
+        // items when History appeared, and the macOS window resized itself every
+        // time the user switched. Export walks the whole log either way.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Add", systemImage: "plus") { isAdding = true }
+            }
+            ToolbarItem(placement: .automatic) {
+                LogExportButton(model: model)
+            }
+        }
+    }
+}
+
+/// Today's total, the focus inside it, the week, and the shape of each day.
+private struct OverviewView: View {
+    var model: AppModel
+
+    @Environment(\.colorScheme) private var colorScheme
+    private var palette: OrbitPalette { .system(colorScheme) }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let now = context.date
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    headline(now: now)
+                    weekChart(now: now)
+                    dayStripes(now: now)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
-    // MARK: Headline — worked time, then focus underneath
+    // MARK: Headline
 
-    private var headline: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(TimeFormatting.humanDuration(model.netWorkedToday()))
-                    .font(.system(size: 46, weight: .semibold, design: .rounded))
+    private func headline(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(TimeFormatting.compact(model.netWorkedToday(now: now)))
+                    .font(.system(size: 38, weight: .semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
+                    .foregroundStyle(palette.ink)
                 Text("worked today")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.inkSecondary)
             }
-
-            HStack(spacing: 14) {
-                Label(focusSummary, systemImage: "brain.head.profile")
-                    .foregroundStyle(.indigo)
-                if model.currentStreak() > 0 {
-                    Label("\(model.currentStreak()) day streak", systemImage: "flame.fill")
-                        .foregroundStyle(.orange)
-                }
-            }
-            .font(.callout)
+            Text(focusSummary(now: now))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.ember)
         }
+        .padding(.top, 2)
+        .accessibilityElement(children: .combine)
     }
 
-    /// "3 focus sessions (75 min)".
-    private var focusSummary: String {
-        let count = model.completedToday()
-        let minutes = model.focusMinutesToday()
-        let noun = count == 1 ? "focus session" : "focus sessions"
-        return "\(count) \(noun) (\(minutes) min)"
+    /// "3 focus sessions · 75 min · 5-day streak" — one ember line, no icons
+    /// competing with the headline above it.
+    private func focusSummary(now: Date) -> String {
+        let count = model.completedToday(now: now)
+        let minutes = model.focusMinutesToday(now: now)
+        let streak = model.currentStreak(now: now)
+
+        var parts = [
+            count == 1 ? String(localized: "1 focus session")
+                       : String(localized: "\(count) focus sessions"),
+            String(localized: "\(minutes) min"),
+        ]
+        if streak > 0 { parts.append(String(localized: "\(streak)-day streak")) }
+        return parts.joined(separator: " · ")
     }
 
-    // MARK: Worked time, with the Pomodoro share stacked inside each bar
+    // MARK: This week
 
-    private var workChart: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Worked this week")
-                .font(.headline)
+    private func weekChart(now: Date) -> some View {
+        let stats = model.dailyWorkStats(now: now)
+        return card("This week") {
             Chart {
-                ForEach(workStats) { day in
+                ForEach(stats) { day in
                     BarMark(
                         x: .value("Day", day.date, unit: .day),
-                        y: .value("Minutes", day.focusMinutes)
+                        y: .value("Minutes", day.focusMinutes),
+                        width: .fixed(18)
                     )
-                    .foregroundStyle(by: .value("Kind", "Focus"))
+                    .foregroundStyle(palette.ember)
+                    .cornerRadius(3)
                     BarMark(
                         x: .value("Day", day.date, unit: .day),
-                        y: .value("Minutes", day.otherMinutes)
+                        y: .value("Minutes", day.otherMinutes),
+                        width: .fixed(18)
                     )
-                    .foregroundStyle(by: .value("Kind", "Other work"))
+                    .foregroundStyle(palette.ember.opacity(0.23))
+                    .cornerRadius(3)
                 }
             }
-            .chartForegroundStyleScale([
-                "Focus": Color.indigo,
-                "Other work": Color.indigo.opacity(0.22),
-            ])
+            .chartLegend(.hidden)
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day)) { _ in
                     AxisValueLabel(format: .dateTime.weekday(.narrow))
-                }
-            }
-            .chartYAxis { AxisMarks(position: .leading) }
-            .chartXScale(domain: dayDomain)
-            .frame(height: 180)
-
-            Text("Full bar is time worked; the solid part is Pomodoro focus.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: When the day started and ended
-
-    private var dayShapeChart: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Day starts and ends")
-                .font(.headline)
-            Chart {
-                ForEach(clockSpans) { span in
-                    if let start = span.startHour, let end = span.endHour {
-                        BarMark(
-                            x: .value("Day", span.date, unit: .day),
-                            yStart: .value("From", start),
-                            yEnd: .value("To", end)
-                        )
-                        .foregroundStyle(Color.blue.gradient)
-                        .cornerRadius(4)
-                        .annotation(position: .top, spacing: 3) {
-                            // A day carried over from the night before has a
-                            // bar but no clock-in of its own to count.
-                            if span.clockInCount > 0 {
-                                Text("\(span.clockInCount)×")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .day)) { _ in
-                    AxisValueLabel(format: .dateTime.weekday(.narrow))
+                        .font(.system(size: 9))
+                        .foregroundStyle(palette.inkSecondary)
                 }
             }
             .chartYAxis {
-                AxisMarks(position: .leading, values: [6, 9, 12, 15, 18, 21]) { value in
-                    AxisValueLabel {
-                        if let hour = value.as(Double.self) {
-                            Text("\(Int(hour)):00")
-                        }
-                    }
-                    AxisGridLine()
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
+                    AxisGridLine().foregroundStyle(palette.hairline)
+                    AxisValueLabel()
+                        .font(.system(size: 9))
+                        .foregroundStyle(palette.inkSecondary)
                 }
             }
-            .chartYScale(domain: hourDomain)
-            .chartXScale(domain: dayDomain)
-            .frame(height: 180)
+            .frame(height: 118)
+            .accessibilityLabel(Text("Worked minutes per day this week, with Pomodoro focus solid."))
 
-            Text("Bar spans first clock-in to last clock-out — or to now, while you're still on the clock; the number is how many times you clocked in.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            legend
         }
+    }
+
+    private var legend: some View {
+        HStack(spacing: 14) {
+            swatch(palette.ember, "Focus")
+            swatch(palette.ember.opacity(0.23), "Other work")
+        }
+        .padding(.top, 2)
+        .accessibilityHidden(true)
+    }
+
+    private func swatch(_ colour: Color, _ label: LocalizedStringKey) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 2).fill(colour).frame(width: 9, height: 9)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(palette.inkSecondary)
+        }
+    }
+
+    // MARK: Day span
+
+    private func dayStripes(now: Date) -> some View {
+        card("Day span · first in to last out") {
+            DayStripesView(spans: model.dailyClockSpans(now: now), now: now)
+        }
+    }
+
+    private func card(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> some View
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 10, weight: .heavy))
+                .tracking(0.9)
+                .textCase(.uppercase)
+                .foregroundStyle(palette.inkSecondary)
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(palette.isNight ? Color.white.opacity(0.04) : Color.black.opacity(0.025))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(palette.hairline, lineWidth: 1)
+                )
+        )
     }
 }

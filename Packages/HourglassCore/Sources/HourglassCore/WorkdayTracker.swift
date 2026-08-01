@@ -94,22 +94,36 @@ public final class WorkdayTracker {
     }
 
     /// A Pomodoro started, so the workday follows it: focusing means you're
-    /// working, and starting any timer means you're back at it, so a running
-    /// coffee break ends — leaving it open would keep charging break time
-    /// against the session you're actually working through.
+    /// working, so a running break ends — leaving it open would keep charging
+    /// break time against the work you're actually doing.
     ///
-    /// The mirror of `clockOut`, which closes a running break from the other end.
+    /// A *break* timer starting does the opposite of what it used to: a Pomodoro
+    /// short or long break is now the same rest interval the workday records, so
+    /// the running work break continues rather than being closed under it. The
+    /// linking itself belongs to ``PomodoroWorkdayCoordinator``; all that matters
+    /// here is that a break phase never ends a work break.
     public func sessionStarted(kind: SessionKind) {
-        if kind == .focus { clockIn() }
+        guard kind == .focus else { return }
+        clockIn()
         endBreak()
     }
 
-    /// Begin a non-Pomodoro break (clocking in first if needed).
-    public func startBreak() {
+    /// Begin a work break (clocking in first if needed), and hand back the
+    /// interval that was opened so a caller can remember which one it owns.
+    ///
+    /// `id` exists for the linked Pomodoro break: two devices both witness the
+    /// same focus completing and both open a rest, so the coordinator derives an
+    /// identity they agree on rather than each minting its own. Without it the
+    /// two rows sync into two overlapping rests and the day loses the time
+    /// twice. A manual break needs no such agreement and takes a fresh id.
+    @discardableResult
+    public func startBreak(id: UUID = UUID()) -> WorkBreak? {
         if !isClockedIn { clockIn() }
-        guard var session = currentSession, !session.isOnBreak else { return }
-        session.breaks.append(WorkBreak(startedAt: clock.now, updatedAt: stamps.next()))
+        guard var session = currentSession, !session.isOnBreak else { return nil }
+        let entry = WorkBreak(id: id, startedAt: clock.now, updatedAt: stamps.next())
+        session.breaks.append(entry)
         persist(session)
+        return entry
     }
 
     /// End the running break, if any.
@@ -120,7 +134,7 @@ public final class WorkdayTracker {
     }
 
     public func toggleBreak() {
-        isOnBreak ? endBreak() : startBreak()
+        if isOnBreak { endBreak() } else { startBreak() }
     }
 
     // MARK: Editing (from the log)

@@ -53,6 +53,10 @@ targets:
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         CFBundleName: Hourglass
+        NSLocationWhenInUseUsageDescription: >-
+          Hourglass uses your approximate location only to know when the sun rises
+          and sets where you are, so the Orbit scene can follow the local sky. It
+          is never shared or synced, and the timer works exactly the same without it.
     scheme:
       gatherCoverageData: true
 
@@ -90,6 +94,10 @@ targets:
         CFBundleVersion: "1"
         CFBundleName: Hourglass
         NSSupportsLiveActivities: true
+        NSLocationWhenInUseUsageDescription: >-
+          Hourglass uses your approximate location only to know when the sun rises
+          and sets where you are, so the Orbit scene can follow the local sky. It
+          is never shared or synced, and the timer works exactly the same without it.
         # Opportunistic top-up while backgrounded (system-scheduled, best effort).
         UIBackgroundModes:
           - fetch
@@ -112,6 +120,9 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: Apps/iOSWidgets
+      # The activity draws in the same visual system as the app: the shared
+      # tokens and the one tint table, nothing else.
+      - path: Shared/OrbitTheme.swift
       - path: Shared/SessionTint.swift
     dependencies:
       - package: HourglassCore
