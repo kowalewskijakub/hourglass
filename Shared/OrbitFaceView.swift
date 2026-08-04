@@ -171,7 +171,7 @@ private struct OrbitHUD: View {
                 CycleDots(
                     completedInCycle: dots.completed,
                     total: dots.total,
-                    tint: palette.ember
+                    tint: palette.color(dots.tone)
                 )
             }
         }

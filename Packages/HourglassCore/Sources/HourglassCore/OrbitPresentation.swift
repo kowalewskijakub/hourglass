@@ -29,6 +29,11 @@ public enum OrbitIcon: String, Equatable, Sendable {
     case restart
     case previous
     case next
+    /// Moving on from a finished phase. A tick rather than an arrow: by the
+    /// time this button appears the phase is already over, so the gesture is
+    /// acknowledging it rather than skipping anything — and a tick cannot be
+    /// mistaken for the transport chevrons it replaces on screen.
+    case continueOn
     case clockIn
     case clockOut
     case endPomodoro
@@ -51,6 +56,8 @@ public enum NumeralKind: String, Equatable, Sendable {
     case workedToday
     /// How long the current open-ended break has run.
     case breakElapsed
+    /// How far a finished phase has run past its planned end.
+    case overrun
     /// The current wall-clock time.
     case wallClock
 }
@@ -67,6 +74,11 @@ public struct NumeralPresentation: Equatable, Sendable {
 public struct CycleDotsPresentation: Equatable, Sendable {
     public let completed: Int
     public let total: Int
+    /// The colour the done dots take. It follows the phase the user is *in*
+    /// rather than the cycle in the abstract — ember while working, stone while
+    /// resting — so the row beside the state label does not go on insisting the
+    /// screen is about work in the middle of a break.
+    public let tone: OrbitTone
     public let accessibilityLabel: String
 }
 
@@ -139,6 +151,13 @@ public enum OrbitAction: String, Equatable, Sendable {
     case restartPhase
     case pause
     case resume
+    /// Leave the timer without ending the working day. Also reachable from the
+    /// overflow menu; it is an action in its own right because the Mac footer
+    /// offers it directly, beside Restart.
+    case endPomodoro
+    /// Move on from a phase that has run past its end. Nothing else does: a
+    /// finished phase keeps counting until the user says they are done with it.
+    case continuePhase
     /// Move back through the cycle. Never exposed as a bare chevron: the
     /// control names the phase it is going to.
     case previousPhase
@@ -179,6 +198,18 @@ public struct TransportPresentation: Equatable, Sendable {
     public let previous: LabeledAction
     public let playPause: LabeledAction
     public let next: LabeledAction
+}
+
+/// Where a surface with more than one place to put controls should draw the
+/// single labelled action.
+///
+/// Only the Mac panel has the choice — it has both a control well over the scene
+/// and a footer. The phone has one control area and ignores this.
+public enum OrbitPrimaryPlacement: String, Equatable, Sendable {
+    /// Over the scene, as the one thing on an otherwise empty screen.
+    case hero
+    /// In the footer, alongside the other controls of a day already under way.
+    case footer
 }
 
 public enum OrbitControlsPresentation: Equatable, Sendable {
@@ -280,7 +311,16 @@ public struct OrbitPresentation: Equatable, Sendable {
     public let contextPills: [ContextPillPresentation]
     public let workdayRail: WorkdayRailPresentation?
     public let clockOut: ClockOutPresentation
+    /// Leaving the timer, promoted out of the overflow menu on the surface that
+    /// has a footer to put it in. Nil when there is no Pomodoro to leave, and
+    /// nil on the phone — there it stays in the overflow, which is the only
+    /// menu that surface has.
+    public let endPomodoro: LabeledAction?
     public let controls: OrbitControlsPresentation
+    /// Where a `.primary` action belongs on a surface that has a choice. Once
+    /// the day is under way its actions gather in the footer; only the action
+    /// that *starts* the day keeps the empty screen to itself.
+    public let primaryPlacement: OrbitPrimaryPlacement
     public let sceneMode: OrbitSceneMode
     public let menuBarBadge: MenuBarBadgePresentation
     public let overflowActions: [OverflowItem]

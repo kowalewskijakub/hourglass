@@ -13,10 +13,13 @@ struct MenuBarBadge: View {
     /// follows the bar's own appearance rather than the Orbit sky.
     let isDarkMenuBar: Bool
 
-    private var ember: Color { Color(hex: isDarkMenuBar ? 0xF0A33F : 0x9A5209) }
-    // A mid stone disappears into a pale menu bar; on light it goes much
-    // darker so "resting" is as readable as "working".
-    private var stone: Color { Color(hex: isDarkMenuBar ? 0xB4AC9B : 0x4A4438) }
+    // Exactly the tokens the rest of the app paints with — `Color.orbitEmber`
+    // and `Color.orbitStone`, resolved by hand for the *menu bar's* appearance
+    // rather than the window's. They used to be a separate pair of hexes, tuned
+    // in isolation, and the result was a status item in a slightly different
+    // orange from the panel that drops down beneath it.
+    private var ember: Color { Color(hex: isDarkMenuBar ? 0xF0A33F : 0x8C4608) }
+    private var stone: Color { Color(hex: isDarkMenuBar ? 0x9B9588 : 0x665F53) }
     private var dim: Color { (isDarkMenuBar ? Color.white : Color.black).opacity(0.42) }
 
     var body: some View {

@@ -388,9 +388,10 @@ struct CompletionOrderingTests {
         )
 
         // The sync layer snapshots the engine inside this callback and mirrors
-        // the snapshot. It must therefore see the SETTLED state — idle at the
-        // next phase — or the wire carries "running, ends right now, old
-        // position" as the final row and every peer regresses a phase.
+        // the snapshot. Nothing advances at the finish any more, so what it must
+        // see is the phase still in place and overrunning — which is exactly
+        // what the peers should adopt, because they are overrunning too. The
+        // advance travels later, as its own state, when the user continues.
         var seen: (phase: PomodoroEngine.Phase, position: Int, remaining: TimeInterval)?
         engine.onSessionCompleted = { [weak engine] _ in
             guard let engine else { return }
@@ -400,8 +401,8 @@ struct CompletionOrderingTests {
         engine.start()
         clock.advance(by: 101)
 
-        #expect(seen?.phase == .idle)
-        #expect(seen?.position == 1)
-        #expect(seen?.remaining == 20)
+        #expect(seen?.phase == .running, "the phase is still in play, over its end")
+        #expect(seen?.position == 0, "nothing advances until the user continues")
+        #expect(seen?.remaining == 0)
     }
 }

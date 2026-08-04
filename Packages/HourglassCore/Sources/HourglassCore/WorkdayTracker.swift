@@ -120,6 +120,14 @@ public final class WorkdayTracker {
     public func startBreak(id: UUID = UUID()) -> WorkBreak? {
         if !isClockedIn { clockIn() }
         guard var session = currentSession, !session.isOnBreak else { return nil }
+        // Two rows under one id is corruption, not a duplicate: `breakDuration`
+        // reduces over the array and charges the day twice, every edit resolves
+        // by `firstIndex(where:)` and can only ever reach the first copy, and
+        // the outbox coalesces on the id so only one of them ever reaches the
+        // server. A caller passing a derived id can collide (see
+        // `PomodoroWorkdayCoordinator.linkedBreakID`); refusing here is what
+        // makes that a no-op rather than a wrong number.
+        guard !session.breaks.contains(where: { $0.id == id }) else { return nil }
         let entry = WorkBreak(id: id, startedAt: clock.now, updatedAt: stamps.next())
         session.breaks.append(entry)
         persist(session)

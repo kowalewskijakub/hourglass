@@ -479,9 +479,10 @@ private func expectConverged(_ world: SyncWorld, sourceLocation: SourceLocation 
 struct SyncScenarioTests {
 
     /// Audit: "Completion pushes a stale pre-advance snapshot… every peer
-    /// regresses to the phase just finished." Both devices must land idle at
-    /// the NEXT phase, and the Pomodoro must exist exactly once.
-    @Test func completionAdvancesBothDevicesAndRecordsOnce() {
+    /// regresses to the phase just finished." Nothing advances at the finish any
+    /// more, so what both devices must agree on is the *overrun* — and the
+    /// Pomodoro must still exist exactly once.
+    @Test func completionLeavesBothDevicesOverrunningAndRecordsOnce() {
         let world = SyncWorld(deviceCount: 2)
         let (a, b) = (world.devices[0], world.devices[1])
 
@@ -494,8 +495,8 @@ struct SyncScenarioTests {
         world.pumpAll()
 
         for device in [a, b] {
-            #expect(device.engine.phase == .idle)
-            #expect(device.engine.cyclePosition == 1, "\(device.name) regressed")
+            #expect(device.engine.isOverrunning, "\(device.name) should be over its end")
+            #expect(device.engine.cyclePosition == 0, "\(device.name) advanced on its own")
         }
         #expect(a.history.all().count == 1)
         #expect(b.history.all().count == 1)
@@ -625,15 +626,15 @@ struct SyncScenarioTests {
         world.pumpAll()
         #expect(b.engine.isRunning)
 
-        // focus -> break -> focus -> break, all auto-started on both devices.
-        world.advanceAll(by: 1_501) // focus 1 done, break auto-starts
-        world.pumpAll()
-        world.advanceAll(by: 301)   // break 1 done, focus auto-starts
-        world.pumpAll()
-        world.advanceAll(by: 1_501) // focus 2 done
-        world.pumpAll()
-        world.advanceAll(by: 301)   // break 2 done
-        world.pumpAll()
+        // focus -> break -> focus -> break. Each phase runs out and waits; the
+        // user continues on device A, and auto-start takes the next one from
+        // there. The mirror must not record a second copy of any of them.
+        for seconds in [1_501.0, 301.0, 1_501.0, 301.0] {
+            world.advanceAll(by: seconds)
+            world.pumpAll()
+            a.engine.advance()  // the user's Continue, on one device only
+            world.pumpAll()
+        }
 
         world.settle()
 
