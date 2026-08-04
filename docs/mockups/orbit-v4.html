@@ -1,0 +1,963 @@
+<title>Hourglass — Orbit, the app</title>
+<style>
+  :root {
+    --space: #070a10;
+    --panel: #0b0f17;
+    --card: #0e1420;
+    --ink: #edf1f8;
+    --ink-2: rgba(237, 241, 248, 0.58);
+    --ink-3: rgba(237, 241, 248, 0.34);
+    --hairline: rgba(237, 241, 248, 0.09);
+    --ember: #f0a33f;
+    --ember-contrast: #170f04;
+    --dawn: #ffd9a0;
+    --atmo: #7fb4e8;
+    --stone: #8a8578;
+    --glass: rgba(20, 27, 40, 0.72);
+    --glass-border: rgba(237, 241, 248, 0.12);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--space); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    line-height: 1.55; margin: 0; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 76px 28px 100px; }
+
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ember); margin: 0 0 18px; }
+  h1 {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+    font-size: clamp(38px, 6vw, 66px); font-weight: 800;
+    letter-spacing: -0.03em; line-height: 1.0; margin: 0 0 20px; text-wrap: balance;
+  }
+  .lede { font-size: 18px; color: var(--ink-2); max-width: 60ch; margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  .section { margin-top: 104px; }
+  .kicker { font-size: 11.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px; }
+  h2 { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+  p.intro { color: var(--ink-2); max-width: 66ch; margin: 8px 0 0; font-size: 15px; }
+
+  .t { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; font-weight: 600; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .cap { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
+
+  .cdots { display: inline-flex; gap: 5px; align-items: center; }
+  .cdots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
+  .cdots i.on { background: var(--ember); box-shadow: 0 0 5px color-mix(in srgb, var(--ember) 60%, transparent); }
+
+  /* ================= hero ================= */
+  .hero { display: grid; grid-template-columns: 1fr auto 1fr; gap: 30px; align-items: center; margin-top: 56px; }
+  @media (max-width: 1080px) { .hero { grid-template-columns: 1fr; justify-items: center; } .callouts.left { text-align: left !important; align-items: flex-start !important; } .callouts.left .co, .callouts.right .co { max-width: 460px; } }
+  .callouts { display: flex; flex-direction: column; gap: 28px; }
+  .callouts.left { text-align: right; align-items: flex-end; }
+  .callouts.right { text-align: left; align-items: flex-start; }
+  .co { max-width: 240px; }
+  .co .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ember); margin-bottom: 7px; }
+  .co h4 { font-size: 13.5px; font-weight: 700; margin: 0 0 4px; }
+  .co p { font-size: 12.5px; color: var(--ink-2); margin: 0; line-height: 1.5; }
+  .heroph { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; }
+
+  .phone-hero {
+    width: 296px; height: 616px; border-radius: 48px;
+    background: #05070c;
+    border: 1px solid rgba(237, 241, 248, 0.15);
+    box-shadow: 0 0 0 5px #0d1017, 0 42px 90px rgba(0,0,0,0.65);
+    position: relative; overflow: hidden; flex: none;
+  }
+  .phone-hero.dayside {
+    background: linear-gradient(180deg, #dfe9f2 0%, #cddfee 100%);
+    border-color: rgba(20, 35, 56, 0.2);
+    box-shadow: 0 0 0 5px #10141c, 0 42px 90px rgba(0,0,0,0.55);
+    --ink: #142238; --ink-2: rgba(20, 34, 56, 0.62); --ink-3: rgba(20, 34, 56, 0.36);
+    --ember: #b3661a; --ember-contrast: #ffffff; --dawn: #8a4d10;
+    --glass: rgba(255, 255, 255, 0.6); --glass-border: rgba(255, 255, 255, 0.78);
+    --hairline: rgba(20, 35, 56, 0.14);
+  }
+  .phone-hero .island { position: absolute; top: 13px; left: 50%; transform: translateX(-50%); width: 80px; height: 22px; border-radius: 13px; background: #000; z-index: 6; box-shadow: 0 0 0 1px rgba(255,255,255,0.06); }
+  .phone-hero svg.scene { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .hud { position: absolute; z-index: 3; left: 25px; right: 25px; top: 62px; }
+  .hud .toprow { display: flex; align-items: center; gap: 10px; }
+  .hud .cap { color: var(--ember); }
+  .hud .big { font-size: 66px; color: var(--ink); margin-top: 9px; }
+  .hud .big.med { font-size: 46px; }
+  .hud .sub { font-size: 13px; color: var(--ink-2); margin-top: 10px; }
+  .hud .sub b { color: var(--ink); font-weight: 600; }
+
+  .ctlrow { position: absolute; z-index: 3; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 16px; bottom: 138px; }
+  .c-s { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--glass-border); background: var(--glass); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; color: var(--ink-2); flex: none; }
+  .c-b { width: 64px; height: 64px; border-radius: 50%; background: var(--ember); display: flex; align-items: center; justify-content: center; color: var(--ember-contrast); box-shadow: 0 0 28px color-mix(in srgb, var(--ember) 42%, transparent), 0 10px 24px rgba(0,0,0,0.35); flex: none; }
+  .c-b.calm { background: var(--stone); color: #17140e; box-shadow: 0 8px 20px rgba(0,0,0,0.35); }
+
+  .wkbar {
+    position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); bottom: 88px;
+    display: flex; align-items: center; gap: 2px;
+    background: var(--glass); backdrop-filter: blur(14px);
+    border: 1px solid var(--glass-border); border-radius: 100px; padding: 4px;
+  }
+  .wkbtn { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 100px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+  .wkbtn svg { display: block; }
+  .wkdiv { width: 1px; height: 16px; background: var(--hairline); }
+
+  .hudchip {
+    display: inline-flex; align-items: center; gap: 7px; margin-top: 12px;
+    background: var(--glass); border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px); border-radius: 100px; padding: 6px 13px;
+    font-size: 12px; font-weight: 600; color: var(--ink-2);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .hudchip b { color: var(--ink); font-weight: 600; }
+  .hudchip .act { display: inline-flex; align-items: center; gap: 5px; }
+  .hudchip .act svg { display: block; }
+
+  .c-w { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--glass-border); background: var(--glass); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; color: var(--ink-2); flex: none; opacity: 0.85; }
+
+  .altgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 34px; }
+  .altcard { background: var(--card); border: 1px solid var(--hairline); border-radius: 18px; padding: 20px; }
+  .altcard .demo { height: 100px; border-radius: 14px; background: #05070c; border: 1px solid rgba(237, 241, 248, 0.08); display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 14px; }
+  .altcard h4 { font-size: 14px; font-weight: 700; margin: 0 0 5px; }
+  .altcard h4 .chosen { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ember); background: color-mix(in srgb, var(--ember) 14%, transparent); border-radius: 100px; padding: 2px 9px; margin-left: 7px; vertical-align: 2px; }
+  .altcard p { font-size: 12.5px; color: var(--ink-2); margin: 0; }
+
+  .strow { display: flex; align-items: center; gap: 9px; padding: 3.5px 0; }
+  .strow .sl { width: 12px; font-size: 9.5px; color: var(--ink-3); text-align: center; }
+  .strack { flex: 1; height: 6px; border-radius: 3px; background: var(--hairline); position: relative; }
+  .sspan { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--ember) 55%, transparent); }
+  .sspan.today { background: var(--ember); }
+
+  .mb-badge .d.hollow { background: transparent; border: 1.5px solid var(--ember); box-shadow: none; }
+  .poprow { display: flex; gap: 30px; flex-wrap: wrap; justify-content: center; }
+  .popcol { display: flex; flex-direction: column; align-items: center; }
+
+  .tabs { position: absolute; z-index: 4; left: 50%; transform: translateX(-50%); bottom: 16px; display: flex; gap: 4px; background: var(--glass); backdrop-filter: blur(18px); border: 1px solid var(--glass-border); border-radius: 100px; padding: 6px; box-shadow: 0 10px 26px rgba(0,0,0,0.35); }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 15px; border-radius: 100px; font-size: 9.5px; font-weight: 600; color: var(--ink-2); }
+  .tab.on { background: color-mix(in srgb, var(--ember) 15%, transparent); color: var(--ember); }
+  .tab svg { display: block; }
+
+  .phlabel { text-align: center; margin-top: 14px; font-size: 12.5px; color: var(--ink-2); }
+  .phcol { display: flex; flex-direction: column; }
+
+  /* ================= screens ================= */
+  .row { display: flex; gap: 30px; flex-wrap: wrap; justify-content: center; margin-top: 46px; align-items: flex-start; }
+  .shot { display: flex; flex-direction: column; align-items: center; }
+  .shot .note { margin-top: 15px; font-size: 12.5px; color: var(--ink-2); max-width: 250px; text-align: center; }
+
+  .phone {
+    width: 250px; height: 522px; border-radius: 40px;
+    background: var(--panel);
+    border: 1px solid rgba(237, 241, 248, 0.13);
+    box-shadow: 0 0 0 4px #0d1017, 0 30px 64px rgba(0,0,0,0.55);
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column; padding: 0 15px;
+    --pl: var(--panel);
+  }
+  .lightui .phone, .phone.lightui {
+    --panel: #f1f4f8; --card: #ffffff;
+    --ink: #16202e; --ink-2: rgba(22, 32, 46, 0.6); --ink-3: rgba(22, 32, 46, 0.38);
+    --hairline: rgba(22, 32, 46, 0.1);
+    --ember: #b3661a; --ember-contrast: #ffffff; --dawn: #8a4d10;
+    --glass: rgba(255, 255, 255, 0.75); --glass-border: rgba(22, 32, 46, 0.1);
+    background: #f1f4f8;
+    border-color: rgba(22, 32, 46, 0.16);
+    box-shadow: 0 0 0 4px #10141c, 0 30px 64px rgba(0,0,0,0.45);
+  }
+  .phone .island2 { width: 68px; height: 19px; border-radius: 11px; background: #000; margin: 12px auto 0; flex: none; }
+  .navtitle { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; margin: 18px 0 12px; padding: 0 2px; flex: none; color: var(--ink); }
+
+  .card { background: var(--card); border: 1px solid var(--hairline); border-radius: 18px; padding: 13px; flex: none; }
+  .card + .card { margin-top: 10px; }
+  .card .ct { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px; }
+
+  .bars { display: flex; align-items: flex-end; gap: 7px; height: 80px; }
+  .bars .b { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
+  .bars .seg { border-radius: 3px 3px 2px 2px; }
+  .bars .f { background: var(--ember); }
+  .bars .o { background: color-mix(in srgb, var(--ember) 24%, transparent); }
+  .bardays { display: flex; gap: 7px; margin-top: 6px; }
+  .bardays span { flex: 1; text-align: center; font-size: 9px; color: var(--ink-3); }
+
+  .arcrow { display: flex; gap: 5px; align-items: flex-end; }
+  .arcrow .day { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .arcrow svg { width: 100%; height: auto; display: block; }
+  .arcrow .track { stroke: var(--hairline); }
+  .arcrow .span { stroke: var(--ember); }
+  .arcrow .lbl { font-size: 9px; color: var(--ink-3); }
+  .arcaxis { display: flex; justify-content: space-between; font-size: 8.5px; color: var(--ink-3); margin-top: 7px; padding: 0 2px; }
+
+  .lrow { display: flex; align-items: center; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--hairline); font-size: 12px; color: var(--ink); }
+  .lrow:last-child { border-bottom: none; }
+  .lrow .ldot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .lrow .lspan { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: 11px; }
+
+  .srow { display: flex; align-items: center; gap: 8px; padding: 9px 2px; border-bottom: 1px solid var(--hairline); font-size: 12.5px; color: var(--ink); }
+  .srow:last-child { border-bottom: none; }
+  .srow .val { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 5px; font-size: 12px; }
+  .srow .chev { color: var(--ink-3); }
+  .tog { width: 36px; height: 21px; border-radius: 100px; background: var(--ember); position: relative; margin-left: auto; flex: none; }
+  .tog.off { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+  .tog::after { content: ""; position: absolute; top: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.4); right: 2px; }
+  .tog.off::after { left: 2px; }
+
+  .tabs2 { margin: auto auto 15px; display: flex; gap: 4px; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 100px; padding: 5px; flex: none; }
+  .tabs2 .tab { padding: 5px 12px; font-size: 9px; }
+
+  /* workday state phones share hero scene styling at smaller scale */
+  .phone-state {
+    width: 250px; height: 522px; border-radius: 40px;
+    background: #05070c;
+    border: 1px solid rgba(237, 241, 248, 0.14);
+    box-shadow: 0 0 0 4px #0d1017, 0 30px 64px rgba(0,0,0,0.55);
+    position: relative; overflow: hidden; flex: none;
+  }
+  .phone-state .island2 { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 68px; height: 19px; border-radius: 11px; background: #000; z-index: 6; }
+  .phone-state svg.scene { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .phone-state .hud { top: 54px; left: 21px; right: 21px; }
+  .phone-state .hud .big { font-size: 46px; }
+  .phone-state .ctlrow { bottom: 120px; }
+  .phone-state .wkbar { bottom: 74px; }
+  .phone-state .tabs { bottom: 14px; }
+  .phone-state .tabs .tab { padding: 5px 12px; font-size: 9px; }
+
+  /* ================= mac ================= */
+  .macstage { display: flex; flex-direction: column; align-items: center; margin-top: 46px; }
+  .menubar {
+    width: 560px; max-width: 100%; display: flex; align-items: center; gap: 14px; padding: 6px 14px;
+    background: rgba(16, 21, 32, 0.85); backdrop-filter: blur(20px);
+    border: 1px solid var(--hairline); border-radius: 12px;
+    font-size: 12px; color: var(--ink-2);
+  }
+  .menubar .l { font-weight: 700; color: var(--ink); }
+  .menubar .sp { flex: 1; }
+  .mb-badge { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .mb-badge .d { width: 6px; height: 6px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 6px rgba(240,163,63,0.8); }
+
+  .popover {
+    width: 330px; border-radius: 24px; margin-top: 12px;
+    background: #05070c; border: 1px solid rgba(237,241,248,0.14);
+    box-shadow: 0 34px 80px rgba(0,0,0,0.6);
+    position: relative; overflow: hidden; height: 244px;
+  }
+  .popover svg.scene { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pop-hud { position: absolute; left: 20px; top: 18px; z-index: 3; }
+  .pop-hud .big { font-size: 40px; color: var(--ink); margin-top: 7px; }
+  .pop-hud .sub { font-size: 11px; color: var(--ink-2); margin-top: 6px; }
+  .pop-ctl { position: absolute; right: 18px; top: 24px; z-index: 3; display: flex; gap: 9px; align-items: center; }
+  .pop-foot {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    display: flex; align-items: center; gap: 4px; padding: 7px 12px;
+    border-top: 1px solid var(--hairline); background: rgba(7, 10, 16, 0.6); backdrop-filter: blur(10px);
+  }
+  .pop-foot .wkbtn { padding: 5px 12px; font-size: 11px; }
+  .pop-foot .sp { flex: 1; }
+  .pop-foot .ic { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--ink-2); }
+
+  /* ================= live activity ================= */
+  .larow { display: flex; gap: 26px; flex-wrap: wrap; justify-content: center; margin-top: 42px; align-items: center; }
+  .lock {
+    width: 340px; border-radius: 26px; padding: 14px 16px;
+    background: rgba(18, 24, 36, 0.85); border: 1px solid var(--glass-border);
+    display: flex; align-items: center; gap: 13px;
+  }
+  .lock .mini { width: 52px; height: 52px; flex: none; position: relative; }
+  .lock .mini svg { width: 100%; height: 100%; display: block; }
+  .di {
+    width: 240px; height: 38px; border-radius: 20px; background: #000;
+    border: 1px solid rgba(237,241,248,0.14);
+    display: flex; align-items: center; padding: 0 16px; gap: 9px;
+  }
+
+  /* ================= tokens ================= */
+  .tokgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin-top: 30px; }
+  .tok { background: var(--card); border: 1px solid var(--hairline); border-radius: 16px; padding: 12px; }
+  .tok .well { height: 44px; border-radius: 10px; border: 1px solid var(--hairline); display: flex; overflow: hidden; }
+  .tok .well i { flex: 1; }
+  .tok .n { font-size: 13px; font-weight: 700; margin: 9px 0 1px; }
+  .tok .v { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+  .tok .u { font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+
+  .motion { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 30px; }
+  .mo { background: var(--card); border: 1px solid var(--hairline); border-radius: 16px; padding: 18px; }
+  .mo h4 { font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+  .mo p { font-size: 13px; color: var(--ink-2); margin: 0; }
+
+  .footnote { margin-top: 72px; font-size: 13px; color: var(--ink-3); max-width: 66ch; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Hourglass · Orbit — product mockup v2</p>
+  <h1>In orbit, above your day.</h1>
+  <p class="lede">The full app in the Orbit direction, now in both skies: <strong>the app follows the real sun</strong> — before local sunset you fly the day side over the blue marble; after dark, the night side over city lights. Amber is the only working color; the cycle reads as dots, never digits; and the workday — clock in, break, clock out — is a first-class loop with its own states.</p>
+
+  <!-- ================= HERO ================= -->
+  <div class="section">
+    <p class="kicker">01 · The timer — focus running</p>
+    <h2>Two skies, one face</h2>
+    <div class="hero">
+      <div class="callouts left">
+        <div class="co"><span class="dot"></span><h4>State as dots</h4><p>"Focus" plus four cycle dots — two burning, two to go. No fractions, no counters; the long break arrives when the dots are full.</p></div>
+        <div class="co"><span class="dot"></span><h4>The orbit is your log</h4><p>Solid arcs are worked stretches; the gaps between them are your breaks; the bright head is the session running now, growing into the now-point.</p></div>
+        <div class="co"><span class="dot"></span><h4>Dawn ahead</h4><p>A warm glow on the right rim — the rest of your day, coming around the curve.</p></div>
+      </div>
+
+      <div class="heroph">
+        <div class="phcol">
+          <div class="phone-hero">
+            <div class="island"></div>
+            <svg class="scene" viewBox="0 0 296 616">
+              <defs>
+                <radialGradient id="planet-n" cx="0.5" cy="0.06" r="1.1">
+                  <stop offset="0" stop-color="#101b2e"/>
+                  <stop offset="0.35" stop-color="#0b1322"/>
+                  <stop offset="1" stop-color="#060a12"/>
+                </radialGradient>
+                <linearGradient id="dawnwash" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="rgba(255,166,87,0)"/>
+                  <stop offset="1" stop-color="rgba(255,166,87,0.30)"/>
+                </linearGradient>
+              </defs>
+              <circle cx="40" cy="86" r="1.1" fill="rgba(237,241,248,0.75)"/>
+              <circle cx="242" cy="56" r="1.3" fill="rgba(237,241,248,0.6)"/>
+              <circle cx="181" cy="118" r="0.9" fill="rgba(237,241,248,0.55)"/>
+              <circle cx="83" cy="174" r="1" fill="rgba(237,241,248,0.35)"/>
+              <circle cx="263" cy="163" r="1" fill="rgba(237,241,248,0.5)"/>
+              <circle cx="124" cy="70" r="0.8" fill="rgba(237,241,248,0.4)"/>
+              <circle cx="35" cy="248" r="1" fill="rgba(237,241,248,0.4)"/>
+              <circle cx="215" cy="233" r="0.9" fill="rgba(237,241,248,0.45)"/>
+              <circle cx="147" cy="198" r="0.7" fill="rgba(237,241,248,0.3)"/>
+              <circle cx="64" cy="306" r="0.9" fill="rgba(237,241,248,0.35)"/>
+              <circle cx="259" cy="291" r="0.8" fill="rgba(237,241,248,0.4)"/>
+
+              <circle cx="148" cy="1086" r="678" fill="url(#planet-n)"/>
+              <ellipse cx="78" cy="486" rx="88" ry="38" fill="rgba(110,140,180,0.05)"/>
+              <ellipse cx="222" cy="542" rx="106" ry="48" fill="rgba(110,140,180,0.04)"/>
+              <circle cx="148" cy="1086" r="678" fill="none" stroke="rgba(130,185,255,0.6)" stroke-width="2" style="filter:blur(1px)"/>
+              <circle cx="148" cy="1086" r="682" fill="none" stroke="rgba(110,170,255,0.30)" stroke-width="12" style="filter:blur(8px)"/>
+              <path d="M 204 418 A 678 678 0 0 1 296 504 L 296 418 Z" fill="url(#dawnwash)" style="filter:blur(10px)"/>
+              <ellipse cx="290" cy="438" rx="58" ry="29" fill="rgba(255,166,87,0.22)" style="filter:blur(14px)"/>
+
+              <g fill="#ffd9a0">
+                <circle cx="68" cy="471" r="1.5" opacity="0.9"/><circle cx="75" cy="475" r="1" opacity="0.6"/><circle cx="62" cy="477" r="0.9" opacity="0.5"/>
+                <circle cx="136" cy="506" r="1.7" opacity="0.95"/><circle cx="143" cy="510" r="1" opacity="0.65"/><circle cx="129" cy="512" r="0.9" opacity="0.5"/><circle cx="139" cy="500" r="0.8" opacity="0.45"/>
+                <circle cx="201" cy="483" r="1.4" opacity="0.85"/><circle cx="208" cy="487" r="0.9" opacity="0.55"/><circle cx="195" cy="488" r="0.8" opacity="0.4"/>
+                <circle cx="101" cy="548" r="1.2" opacity="0.7"/><circle cx="107" cy="551" r="0.8" opacity="0.45"/>
+                <circle cx="234" cy="531" r="1.2" opacity="0.7"/><circle cx="239" cy="535" r="0.8" opacity="0.4"/>
+                <circle cx="44" cy="523" r="1" opacity="0.5"/>
+                <circle cx="172" cy="562" r="1" opacity="0.5"/>
+                <circle cx="247" cy="581" r="0.9" opacity="0.4"/>
+                <circle cx="87" cy="586" r="0.8" opacity="0.35"/>
+              </g>
+
+              <g transform="rotate(-90 148 1086)">
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="rgba(237,241,248,0.10)" stroke-width="1.5" stroke-dasharray="2 15"/>
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="7" stroke-linecap="round" stroke-dasharray="300 4337" stroke-dashoffset="565"/>
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="7" stroke-linecap="round" stroke-dasharray="115 4522" stroke-dashoffset="198"/>
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="#f0a33f" stroke-width="7" stroke-linecap="round" stroke-dasharray="56 4581" stroke-dashoffset="56"/>
+              </g>
+              <circle cx="148" cy="348" r="5" fill="#ffd9a0" style="filter:drop-shadow(0 0 7px rgba(240,163,63,0.95))"/>
+              <circle cx="148" cy="348" r="11" fill="none" stroke="rgba(240,163,63,0.45)" stroke-width="1.5"/>
+              <circle cx="148" cy="348" r="18" fill="none" stroke="rgba(240,163,63,0.18)" stroke-width="1"/>
+            </svg>
+
+            <div class="hud">
+              <div class="toprow"><span class="cap">Focus</span><span class="cdots"><i class="on"></i><i class="on"></i><i></i><i></i></span></div>
+              <div class="t big">24:53</div>
+              <div class="hudchip"><span style="width:6px;height:6px;border-radius:50%;background:var(--ember);flex:none"></span><b>3h 12m</b><span>· in since 9:12</span><svg width="9" height="9" viewBox="0 0 12 12" style="opacity:.55"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            </div>
+
+            <div class="ctlrow" style="bottom:122px">
+              <div class="c-s"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M9 1.5 4 6.5l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <div class="c-b"><svg width="17" height="17" viewBox="0 0 22 22"><path d="M6 4h3v14H6zM13 4h3v14h-3z" fill="currentColor"/></svg></div>
+              <div class="c-s"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M4 1.5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            </div>
+
+            <div class="tabs">
+              <div class="tab on"><svg width="15" height="15" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+              <div class="tab"><svg width="15" height="15" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+              <div class="tab"><svg width="15" height="15" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+            </div>
+          </div>
+          <p class="phlabel">Night pass — after local sunset</p>
+        </div>
+
+        <div class="phcol">
+          <div class="phone-hero dayside">
+            <div class="island"></div>
+            <svg class="scene" viewBox="0 0 296 616">
+              <defs>
+                <radialGradient id="planet-d" cx="0.5" cy="0.05" r="1.15">
+                  <stop offset="0" stop-color="#4a80b5"/>
+                  <stop offset="0.4" stop-color="#31608f"/>
+                  <stop offset="1" stop-color="#1e4269"/>
+                </radialGradient>
+              </defs>
+              <circle cx="148" cy="1086" r="678" fill="url(#planet-d)"/>
+              <ellipse cx="86" cy="470" rx="64" ry="15" fill="rgba(255,255,255,0.8)" style="filter:blur(8px)"/>
+              <ellipse cx="210" cy="512" rx="80" ry="18" fill="rgba(255,255,255,0.65)" style="filter:blur(10px)"/>
+              <ellipse cx="130" cy="556" rx="58" ry="14" fill="rgba(255,255,255,0.55)" style="filter:blur(9px)"/>
+              <ellipse cx="250" cy="470" rx="40" ry="10" fill="rgba(255,255,255,0.5)" style="filter:blur(7px)"/>
+              <ellipse cx="55" cy="540" rx="46" ry="12" fill="rgba(255,255,255,0.45)" style="filter:blur(9px)"/>
+              <circle cx="148" cy="1086" r="678" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" style="filter:blur(1px)"/>
+              <circle cx="148" cy="1086" r="682" fill="none" stroke="rgba(140,200,255,0.55)" stroke-width="10" style="filter:blur(6px)"/>
+
+              <g transform="rotate(-90 148 1086)">
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="rgba(20,35,56,0.18)" stroke-width="1.5" stroke-dasharray="2 15"/>
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="rgba(179,102,26,0.45)" stroke-width="7" stroke-linecap="round" stroke-dasharray="300 4337" stroke-dashoffset="565"/>
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="rgba(179,102,26,0.45)" stroke-width="7" stroke-linecap="round" stroke-dasharray="115 4522" stroke-dashoffset="198"/>
+                <circle cx="148" cy="1086" r="738" fill="none" stroke="#b3661a" stroke-width="7" stroke-linecap="round" stroke-dasharray="56 4581" stroke-dashoffset="56"/>
+              </g>
+              <circle cx="148" cy="348" r="5" fill="#b3661a"/>
+              <circle cx="148" cy="348" r="11" fill="none" stroke="rgba(179,102,26,0.45)" stroke-width="1.5"/>
+              <circle cx="148" cy="348" r="18" fill="none" stroke="rgba(179,102,26,0.18)" stroke-width="1"/>
+            </svg>
+
+            <div class="hud">
+              <div class="toprow"><span class="cap">Focus</span><span class="cdots"><i class="on"></i><i class="on"></i><i></i><i></i></span></div>
+              <div class="t big">24:53</div>
+              <div class="hudchip"><span style="width:6px;height:6px;border-radius:50%;background:var(--ember);flex:none"></span><b>3h 12m</b><span class="wkdiv"></span><span class="act"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 6h8v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM11 7h1.5a1.5 1.5 0 0 1 0 3H11M5 3.5v1M8 3v1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Break</span><span class="wkdiv"></span><span class="act"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M6 3H3.5v10H6M10 5.5 12.5 8 10 10.5M6.5 8h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Clock out</span><svg width="9" height="9" viewBox="0 0 12 12" style="opacity:.55"><path d="M2.5 7.5 6 4l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            </div>
+
+            <div class="ctlrow" style="bottom:122px">
+              <div class="c-s"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M9 1.5 4 6.5l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <div class="c-b"><svg width="17" height="17" viewBox="0 0 22 22"><path d="M6 4h3v14H6zM13 4h3v14h-3z" fill="currentColor"/></svg></div>
+              <div class="c-s"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M4 1.5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            </div>
+
+            <div class="tabs">
+              <div class="tab on"><svg width="15" height="15" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+              <div class="tab"><svg width="15" height="15" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+              <div class="tab"><svg width="15" height="15" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+            </div>
+          </div>
+          <p class="phlabel">Day pass — status chip morphed open (Break / Clock out)</p>
+        </div>
+      </div>
+
+      <div class="callouts right">
+        <div class="co"><span class="dot"></span><h4>The now-point</h4><p>You, at the top of the arc — a satellite with a soft pulse, once per second while running.</p></div>
+        <div class="co"><span class="dot"></span><h4>The sun is real</h4><p>The sky isn't a theme toggle: it tracks actual sunrise and sunset at your location. Override to fixed night or day in Settings.</p></div>
+        <div class="co"><span class="dot"></span><h4>The status chip</h4><p>The workday lives in one glass chip under the numerals: collapsed it reads your day, tapped it morphs open into Break / Clock out. The bottom row is transport only — nothing stacked.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= CONTROL ALTERNATIVES ================= -->
+  <div class="section" style="margin-top:72px">
+    <p class="kicker">01b · Controls — the three candidates</p>
+    <h2>One row, three ways</h2>
+    <p class="intro">The two stacked bars are gone. Three ways to fold the workday actions into the timer screen — the chip morph is what the mockups now use: both hero phones above show it, collapsed on the night pass and open on the day pass.</p>
+    <div class="altgrid">
+      <div class="altcard">
+        <div class="demo">
+          <div class="c-w"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 6h8v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM11 7h1.5a1.5 1.5 0 0 1 0 3H11M5 3.5v1M8 3v1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+          <div class="c-s"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M9 1.5 4 6.5l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="c-b" style="width:54px;height:54px"><svg width="15" height="15" viewBox="0 0 22 22"><path d="M6 4h3v14H6zM13 4h3v14h-3z" fill="currentColor"/></svg></div>
+          <div class="c-s"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M4 1.5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="c-w"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M6 3H3.5v10H6M10 5.5 12.5 8 10 10.5M6.5 8h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        </div>
+        <h4>Constellation</h4>
+        <p>Five circles, hierarchy by size: workday actions are the small outer stars. Everything visible, nothing stacked — but five targets in a row is the busiest floor of the three.</p>
+      </div>
+      <div class="altcard">
+        <div class="demo">
+          <div style="display:flex;align-items:center;gap:2px;background:var(--glass);border:1px solid var(--glass-border);border-radius:100px;padding:5px">
+            <div class="wkbtn" style="padding:6px 12px"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 6h8v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM11 7h1.5a1.5 1.5 0 0 1 0 3H11M5 3.5v1M8 3v1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+            <div class="wkdiv"></div>
+            <div class="wkbtn" style="padding:6px 10px"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M9 1.5 4 6.5l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div style="width:46px;height:46px;border-radius:50%;background:var(--ember);display:flex;align-items:center;justify-content:center;color:var(--ember-contrast);margin:0 2px"><svg width="13" height="13" viewBox="0 0 22 22"><path d="M6 4h3v14H6zM13 4h3v14h-3z" fill="currentColor"/></svg></div>
+            <div class="wkbtn" style="padding:6px 10px"><svg width="12" height="12" viewBox="0 0 13 13"><path d="M4 1.5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="wkdiv"></div>
+            <div class="wkbtn" style="padding:6px 12px"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M6 3H3.5v10H6M10 5.5 12.5 8 10 10.5M6.5 8h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+        </div>
+        <h4>One capsule</h4>
+        <p>Everything inside a single glass capsule with hairline dividers — reads as one object, closest to the iOS 26 grouped-toolbar idiom. Slightly denser than the constellation.</p>
+      </div>
+      <div class="altcard">
+        <div class="demo" style="flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:7px;background:var(--glass);border:1px solid var(--glass-border);border-radius:100px;padding:6px 14px;font-size:11.5px;font-weight:600;color:var(--ink-2)">
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--ember)"></span>in since 9:12
+          </div>
+          <svg width="11" height="11" viewBox="0 0 12 12" style="color:var(--ink-3)"><path d="M6 1v10M2.5 7.5 6 11l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div style="display:flex;align-items:center;gap:2px;background:var(--glass);border:1px solid var(--glass-border);border-radius:100px;padding:4px">
+            <div class="wkbtn" style="padding:5px 13px"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 6h8v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM11 7h1.5a1.5 1.5 0 0 1 0 3H11M5 3.5v1M8 3v1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Break</div>
+            <div class="wkdiv"></div>
+            <div class="wkbtn" style="padding:5px 13px"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M6 3H3.5v10H6M10 5.5 12.5 8 10 10.5M6.5 8h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Clock out</div>
+          </div>
+        </div>
+        <h4>Chip morph<span class="chosen">In the mocks</span></h4>
+        <p>Only the transport lives at the bottom; the status line in the HUD is a tappable glass chip that morphs open into Break / Clock out. The quietest screen of the three — the status read-out and the workday controls are one object.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= WORKDAY LOOP ================= -->
+  <div class="section">
+    <p class="kicker">02 · The workday loop</p>
+    <h2>Clock in → work → break → clock out</h2>
+    <p class="intro">Pomodoro is optional; the workday is the spine. These are the three states outside a running focus session. The primary button is always the one thing you'd do next — there is never a hidden mode to find.</p>
+
+    <div class="row">
+      <div class="shot">
+        <div class="phone-state">
+          <div class="island2"></div>
+          <svg class="scene" viewBox="0 0 250 522">
+            <circle cx="36" cy="76" r="1" fill="rgba(237,241,248,0.7)"/>
+            <circle cx="205" cy="52" r="1.1" fill="rgba(237,241,248,0.55)"/>
+            <circle cx="150" cy="102" r="0.8" fill="rgba(237,241,248,0.5)"/>
+            <circle cx="70" cy="152" r="0.9" fill="rgba(237,241,248,0.35)"/>
+            <circle cx="222" cy="140" r="0.9" fill="rgba(237,241,248,0.45)"/>
+            <circle cx="125" cy="920" r="575" fill="#0a1220"/>
+            <circle cx="125" cy="920" r="575" fill="none" stroke="rgba(130,185,255,0.5)" stroke-width="1.8" style="filter:blur(1px)"/>
+            <circle cx="125" cy="920" r="578" fill="none" stroke="rgba(110,170,255,0.26)" stroke-width="10" style="filter:blur(7px)"/>
+            <ellipse cx="245" cy="372" rx="46" ry="24" fill="rgba(255,166,87,0.18)" style="filter:blur(12px)"/>
+            <g fill="#ffd9a0">
+              <circle cx="70" cy="404" r="1.3" opacity="0.85"/><circle cx="76" cy="407" r="0.8" opacity="0.5"/>
+              <circle cx="132" cy="428" r="1.4" opacity="0.9"/><circle cx="138" cy="431" r="0.9" opacity="0.55"/>
+              <circle cx="188" cy="410" r="1.1" opacity="0.7"/>
+              <circle cx="45" cy="440" r="0.9" opacity="0.5"/>
+            </g>
+            <g transform="rotate(-90 125 920)">
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(237,241,248,0.10)" stroke-width="1.3" stroke-dasharray="2 14"/>
+            </g>
+            <circle cx="125" cy="295" r="4" fill="rgba(138,133,120,0.8)"/>
+            <circle cx="125" cy="295" r="9" fill="none" stroke="rgba(138,133,120,0.3)" stroke-width="1.2"/>
+          </svg>
+          <div class="hud">
+            <div class="toprow"><span class="cap" style="color:var(--stone)">Clocked out</span></div>
+            <div class="t big">9:08</div>
+            <div class="sub">Wednesday · yesterday you worked <b>6h 40m</b></div>
+          </div>
+          <div class="ctlrow" style="bottom:110px">
+            <div class="c-b" style="width:auto;height:52px;border-radius:100px;padding:0 26px;gap:9px;display:flex;align-items:center">
+              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 13V4M4.5 7.5 8 4l3.5 3.5M3 14.5h10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span style="font-size:14px;font-weight:700">Clock in</span>
+            </div>
+          </div>
+          <div class="tabs">
+            <div class="tab on"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+          </div>
+        </div>
+        <p class="note"><b>Clocked out.</b> The face is a quiet clock: current time, an empty dotted orbit, a dim satellite. One button — Clock in — and pressing it is the launch ceremony.</p>
+      </div>
+
+      <div class="shot">
+        <div class="phone-state">
+          <div class="island2"></div>
+          <svg class="scene" viewBox="0 0 250 522">
+            <circle cx="36" cy="76" r="1" fill="rgba(237,241,248,0.7)"/>
+            <circle cx="205" cy="52" r="1.1" fill="rgba(237,241,248,0.55)"/>
+            <circle cx="150" cy="102" r="0.8" fill="rgba(237,241,248,0.5)"/>
+            <circle cx="70" cy="152" r="0.9" fill="rgba(237,241,248,0.35)"/>
+            <circle cx="222" cy="140" r="0.9" fill="rgba(237,241,248,0.45)"/>
+            <circle cx="125" cy="920" r="575" fill="#0a1220"/>
+            <circle cx="125" cy="920" r="575" fill="none" stroke="rgba(130,185,255,0.5)" stroke-width="1.8" style="filter:blur(1px)"/>
+            <circle cx="125" cy="920" r="578" fill="none" stroke="rgba(110,170,255,0.26)" stroke-width="10" style="filter:blur(7px)"/>
+            <ellipse cx="245" cy="372" rx="46" ry="24" fill="rgba(255,166,87,0.18)" style="filter:blur(12px)"/>
+            <g fill="#ffd9a0">
+              <circle cx="70" cy="404" r="1.3" opacity="0.85"/><circle cx="76" cy="407" r="0.8" opacity="0.5"/>
+              <circle cx="132" cy="428" r="1.4" opacity="0.9"/><circle cx="138" cy="431" r="0.9" opacity="0.55"/>
+              <circle cx="188" cy="410" r="1.1" opacity="0.7"/>
+              <circle cx="45" cy="440" r="0.9" opacity="0.5"/>
+            </g>
+            <g transform="rotate(-90 125 920)">
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(237,241,248,0.10)" stroke-width="1.3" stroke-dasharray="2 14"/>
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="6" stroke-linecap="round" stroke-dasharray="230 3697" stroke-dashoffset="430"/>
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="6" stroke-linecap="round" stroke-dasharray="90 3837" stroke-dashoffset="152"/>
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(240,163,63,0.55)" stroke-width="6" stroke-linecap="round" stroke-dasharray="44 3883" stroke-dashoffset="44"/>
+            </g>
+            <circle cx="125" cy="295" r="4.5" fill="#ffd9a0" style="filter:drop-shadow(0 0 6px rgba(240,163,63,0.9))"/>
+            <circle cx="125" cy="295" r="10" fill="none" stroke="rgba(240,163,63,0.4)" stroke-width="1.3"/>
+          </svg>
+          <div class="hud">
+            <div class="toprow"><span class="cap">Clocked in</span></div>
+            <div class="t big">3:12:44</div>
+            <div class="hudchip"><span style="width:6px;height:6px;border-radius:50%;background:var(--ember);flex:none"></span><span>since 9:12 · break 41m ago</span><svg width="9" height="9" viewBox="0 0 12 12" style="opacity:.55"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+          <div class="ctlrow" style="bottom:104px">
+            <div class="c-b" style="width:auto;height:52px;border-radius:100px;padding:0 24px;gap:9px;display:flex;align-items:center">
+              <svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
+              <span style="font-size:14px;font-weight:700">Start focus</span>
+            </div>
+          </div>
+          <div class="tabs">
+            <div class="tab on"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+          </div>
+        </div>
+        <p class="note"><b>Working, no timer.</b> The big numeral is your elapsed day; the current stretch glows softly and keeps recording. The one big action is an explicit <b>Start focus</b> — no ambiguous play glyph — and Break / Clock out wait in the chip.</p>
+      </div>
+
+      <div class="shot">
+        <div class="phone-state">
+          <div class="island2"></div>
+          <svg class="scene" viewBox="0 0 250 522">
+            <circle cx="36" cy="76" r="1" fill="rgba(237,241,248,0.7)"/>
+            <circle cx="205" cy="52" r="1.1" fill="rgba(237,241,248,0.55)"/>
+            <circle cx="150" cy="102" r="0.8" fill="rgba(237,241,248,0.5)"/>
+            <circle cx="70" cy="152" r="0.9" fill="rgba(237,241,248,0.35)"/>
+            <circle cx="222" cy="140" r="0.9" fill="rgba(237,241,248,0.45)"/>
+            <circle cx="125" cy="920" r="575" fill="#0a1220"/>
+            <circle cx="125" cy="920" r="575" fill="none" stroke="rgba(130,185,255,0.5)" stroke-width="1.8" style="filter:blur(1px)"/>
+            <circle cx="125" cy="920" r="578" fill="none" stroke="rgba(110,170,255,0.26)" stroke-width="10" style="filter:blur(7px)"/>
+            <g fill="#ffd9a0">
+              <circle cx="70" cy="404" r="1.3" opacity="0.85"/><circle cx="76" cy="407" r="0.8" opacity="0.5"/>
+              <circle cx="132" cy="428" r="1.4" opacity="0.9"/><circle cx="138" cy="431" r="0.9" opacity="0.55"/>
+              <circle cx="188" cy="410" r="1.1" opacity="0.7"/>
+              <circle cx="45" cy="440" r="0.9" opacity="0.5"/>
+            </g>
+            <g transform="rotate(-90 125 920)">
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(237,241,248,0.10)" stroke-width="1.3" stroke-dasharray="2 14"/>
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(240,163,63,0.30)" stroke-width="6" stroke-linecap="round" stroke-dasharray="230 3697" stroke-dashoffset="430"/>
+              <circle cx="125" cy="920" r="625" fill="none" stroke="rgba(240,163,63,0.30)" stroke-width="6" stroke-linecap="round" stroke-dasharray="134 3793" stroke-dashoffset="152"/>
+            </g>
+            <circle cx="125" cy="295" r="4.5" fill="rgba(202,193,172,0.9)"/>
+            <circle cx="125" cy="295" r="10" fill="none" stroke="rgba(138,133,120,0.35)" stroke-width="1.3"/>
+          </svg>
+          <div class="hud">
+            <div class="toprow"><span class="cap" style="color:var(--stone)">On break</span></div>
+            <div class="t big">4:12</div>
+            <div class="hudchip"><span style="width:6px;height:6px;border-radius:50%;background:var(--stone);flex:none"></span><span>started 14:28</span><svg width="9" height="9" viewBox="0 0 12 12" style="opacity:.55"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+          <div class="ctlrow" style="bottom:104px">
+            <div class="c-b calm" style="width:auto;height:52px;border-radius:100px;padding:0 24px;gap:9px;display:flex;align-items:center">
+              <svg width="13" height="13" viewBox="0 0 22 22"><path d="M6 3.5v15l12-7.5z" fill="currentColor"/></svg>
+              <span style="font-size:14px;font-weight:700">Back to work</span>
+            </div>
+          </div>
+          <div class="tabs">
+            <div class="tab on"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+          </div>
+        </div>
+        <p class="note"><b>On break.</b> Everything cools to stone: the satellite stops pulsing, the numeral counts the break. One warm action brings you back; Clock out waits inside the chip.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= STATS + SETTINGS ================= -->
+  <div class="section">
+    <p class="kicker">03 · The tabs</p>
+    <h2>Stats &amp; Settings, both skies</h2>
+    <p class="intro">Secondary screens drop the planet — flat surfaces, elevated cards, amber only where it means something. Each is shown in night and day dress; they follow the same sun as the face.</p>
+
+    <div class="row">
+      <div class="shot">
+        <div class="phone">
+          <div class="island2"></div>
+          <div class="navtitle">Stats</div>
+          <div style="flex:none;padding:0 2px 13px">
+            <div style="display:flex;align-items:baseline;gap:7px">
+              <span class="t" style="font-size:36px;color:var(--ink)">3h 12m</span>
+              <span style="font-size:12px;color:var(--ink-2)">worked today</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--ember);font-weight:600;margin-top:6px">3 focus sessions · 75 min &nbsp;·&nbsp; 5-day streak</div>
+          </div>
+          <div class="card">
+            <p class="ct">This week</p>
+            <div class="bars">
+              <div class="b"><div class="seg o" style="height:24px"></div><div class="seg f" style="height:28px"></div></div>
+              <div class="b"><div class="seg o" style="height:32px"></div><div class="seg f" style="height:36px"></div></div>
+              <div class="b"><div class="seg o" style="height:17px"></div><div class="seg f" style="height:41px"></div></div>
+              <div class="b"><div class="seg o" style="height:37px"></div><div class="seg f" style="height:22px"></div></div>
+              <div class="b"><div class="seg o" style="height:20px"></div><div class="seg f" style="height:32px"></div></div>
+              <div class="b"><div class="seg o" style="height:7px"></div><div class="seg f" style="height:9px"></div></div>
+              <div class="b"><div class="seg o" style="height:13px"></div><div class="seg f" style="height:18px"></div></div>
+            </div>
+            <div class="bardays"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+          </div>
+          <div class="card">
+            <p class="ct">Day stripes — first in to last out</p>
+            <div style="padding:2px 2px 0">
+              <div class="strow"><span class="sl">M</span><div class="strack"><div class="sspan" style="left:37.5%;width:35.5%"></div></div></div>
+              <div class="strow"><span class="sl">T</span><div class="strack"><div class="sspan" style="left:35.4%;width:40.6%"></div></div></div>
+              <div class="strow"><span class="sl">W</span><div class="strack"><div class="sspan today" style="left:38.3%;width:22.3%"></div><div style="position:absolute;left:60.6%;top:50%;transform:translate(-50%,-50%);width:5px;height:5px;border-radius:50%;background:var(--dawn)"></div></div></div>
+              <div class="strow"><span class="sl">T</span><div class="strack"></div></div>
+              <div class="strow"><span class="sl">F</span><div class="strack"></div></div>
+              <div class="strow"><span class="sl">S</span><div class="strack"></div></div>
+              <div class="strow"><span class="sl">S</span><div class="strack"></div></div>
+            </div>
+            <div class="arcaxis"><span>0h</span><span>noon</span><span>24h</span></div>
+          </div>
+          <div class="card">
+            <p class="ct">History</p>
+            <div class="lrow"><span class="ldot" style="background:var(--ember)"></span>Focus · 25m<span class="lspan">13:41 – 14:06</span></div>
+            <div class="lrow"><span class="ldot" style="background:var(--stone)"></span>Break · 5m<span class="lspan">13:36 – 13:41</span></div>
+            <div class="lrow"><span class="ldot" style="background:var(--ember)"></span>Focus · 25m<span class="lspan">13:11 – 13:36</span></div>
+          </div>
+          <div class="tabs2">
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+            <div class="tab on"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+          </div>
+        </div>
+        <p class="note">Night. Day stripes: each day one 0–24h track, the span running first clock-in to last clock-out. Past days as dim embers, today bright with the dawn dot at "now", empty tracks for days not yet flown.</p>
+      </div>
+
+      <div class="shot">
+        <div class="phone lightui">
+          <div class="island2"></div>
+          <div class="navtitle">Stats</div>
+          <div style="flex:none;padding:0 2px 13px">
+            <div style="display:flex;align-items:baseline;gap:7px">
+              <span class="t" style="font-size:36px;color:var(--ink)">3h 12m</span>
+              <span style="font-size:12px;color:var(--ink-2)">worked today</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--ember);font-weight:600;margin-top:6px">3 focus sessions · 75 min &nbsp;·&nbsp; 5-day streak</div>
+          </div>
+          <div class="card">
+            <p class="ct">This week</p>
+            <div class="bars">
+              <div class="b"><div class="seg o" style="height:24px"></div><div class="seg f" style="height:28px"></div></div>
+              <div class="b"><div class="seg o" style="height:32px"></div><div class="seg f" style="height:36px"></div></div>
+              <div class="b"><div class="seg o" style="height:17px"></div><div class="seg f" style="height:41px"></div></div>
+              <div class="b"><div class="seg o" style="height:37px"></div><div class="seg f" style="height:22px"></div></div>
+              <div class="b"><div class="seg o" style="height:20px"></div><div class="seg f" style="height:32px"></div></div>
+              <div class="b"><div class="seg o" style="height:7px"></div><div class="seg f" style="height:9px"></div></div>
+              <div class="b"><div class="seg o" style="height:13px"></div><div class="seg f" style="height:18px"></div></div>
+            </div>
+            <div class="bardays"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+          </div>
+          <div class="card">
+            <p class="ct">Day stripes — first in to last out</p>
+            <div style="padding:2px 2px 0">
+              <div class="strow"><span class="sl">M</span><div class="strack"><div class="sspan" style="left:37.5%;width:35.5%"></div></div></div>
+              <div class="strow"><span class="sl">T</span><div class="strack"><div class="sspan" style="left:35.4%;width:40.6%"></div></div></div>
+              <div class="strow"><span class="sl">W</span><div class="strack"><div class="sspan today" style="left:38.3%;width:22.3%"></div><div style="position:absolute;left:60.6%;top:50%;transform:translate(-50%,-50%);width:5px;height:5px;border-radius:50%;background:var(--dawn)"></div></div></div>
+              <div class="strow"><span class="sl">T</span><div class="strack"></div></div>
+              <div class="strow"><span class="sl">F</span><div class="strack"></div></div>
+              <div class="strow"><span class="sl">S</span><div class="strack"></div></div>
+              <div class="strow"><span class="sl">S</span><div class="strack"></div></div>
+            </div>
+            <div class="arcaxis"><span>0h</span><span>noon</span><span>24h</span></div>
+          </div>
+          <div class="card">
+            <p class="ct">History</p>
+            <div class="lrow"><span class="ldot" style="background:var(--ember)"></span>Focus · 25m<span class="lspan">13:41 – 14:06</span></div>
+            <div class="lrow"><span class="ldot" style="background:var(--stone)"></span>Break · 5m<span class="lspan">13:36 – 13:41</span></div>
+            <div class="lrow"><span class="ldot" style="background:var(--ember)"></span>Focus · 25m<span class="lspan">13:11 – 13:36</span></div>
+          </div>
+          <div class="tabs2">
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+            <div class="tab on"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+          </div>
+        </div>
+        <p class="note">Day. Cool paper surfaces, white cards, the deep-amber accent — the same layout unchanged.</p>
+      </div>
+
+      <div class="shot">
+        <div class="phone lightui">
+          <div class="island2"></div>
+          <div class="navtitle">Settings</div>
+          <div class="card">
+            <p class="ct">Durations</p>
+            <div class="srow">Focus<span class="val">25 min <span class="chev">›</span></span></div>
+            <div class="srow">Short break<span class="val">5 min <span class="chev">›</span></span></div>
+            <div class="srow">Long break<span class="val">15 min <span class="chev">›</span></span></div>
+            <div class="srow">Long break every<span class="val">4 sessions <span class="chev">›</span></span></div>
+          </div>
+          <div class="card">
+            <p class="ct">Automation</p>
+            <div class="srow">Auto-start breaks<span class="tog"></span></div>
+            <div class="srow">Auto-start next focus<span class="tog off"></span></div>
+          </div>
+          <div class="card">
+            <p class="ct">Alerts</p>
+            <div class="srow">Sound<span class="tog"></span></div>
+            <div class="srow">Notifications<span class="tog"></span></div>
+          </div>
+          <div class="card">
+            <p class="ct">Workday</p>
+            <div class="srow">Clock-in reminder<span class="val">9:00 <span class="chev">›</span></span></div>
+            <div class="srow">Sky<span class="val">Follow the sun <span class="chev">›</span></span></div>
+            <div class="srow">Sync<span class="val">On <span class="chev">›</span></span></div>
+          </div>
+          <div class="tabs2">
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="2.6" r="1.6" fill="currentColor"/></svg>Orbit</div>
+            <div class="tab"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Stats</div>
+            <div class="tab on"><svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.1"/></svg>Settings</div>
+          </div>
+        </div>
+        <p class="note">Settings in day dress — note the new "Sky" row: Follow the sun / Always night / Always day.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= MAC ================= -->
+  <div class="section">
+    <p class="kicker">04 · macOS</p>
+    <h2>The menu bar &amp; popover</h2>
+    <p class="intro">A landscape crop of the same orbit, in both working states. Exactly the iPhone's content, nothing more — the workday actions sit in the footer, Stats and the menu behind two quiet icons. The badge tells the state at a glance: a solid dot with the countdown while focusing, a hollow dot with the day's elapsed time when just clocked in.</p>
+
+    <div class="macstage">
+      <div class="menubar">
+        <span class="l">&#63743;</span><span>Hourglass</span><span class="sp"></span>
+        <span class="mb-badge"><span class="d"></span>24:53</span>
+        <span>Wed 14:32</span>
+      </div>
+      <div class="poprow" style="margin-top:14px">
+      <div class="popcol">
+      <div class="popover">
+        <svg class="scene" viewBox="0 0 330 244">
+          <circle cx="70" cy="56" r="1" fill="rgba(237,241,248,0.6)"/>
+          <circle cx="290" cy="38" r="1.1" fill="rgba(237,241,248,0.5)"/>
+          <circle cx="200" cy="24" r="0.8" fill="rgba(237,241,248,0.45)"/>
+          <circle cx="250" cy="82" r="0.8" fill="rgba(237,241,248,0.35)"/>
+          <circle cx="165" cy="732" r="600" fill="#0a1220"/>
+          <circle cx="165" cy="732" r="600" fill="none" stroke="rgba(130,185,255,0.55)" stroke-width="2" style="filter:blur(1px)"/>
+          <circle cx="165" cy="732" r="604" fill="none" stroke="rgba(110,170,255,0.28)" stroke-width="10" style="filter:blur(7px)"/>
+          <ellipse cx="325" cy="170" rx="45" ry="22" fill="rgba(255,166,87,0.2)" style="filter:blur(12px)"/>
+          <g fill="#ffd9a0">
+            <circle cx="90" cy="190" r="1.3" opacity="0.85"/><circle cx="96" cy="193" r="0.8" opacity="0.5"/>
+            <circle cx="170" cy="206" r="1.4" opacity="0.9"/><circle cx="176" cy="209" r="0.9" opacity="0.55"/>
+            <circle cx="240" cy="194" r="1.1" opacity="0.7"/>
+            <circle cx="45" cy="209" r="0.9" opacity="0.5"/>
+          </g>
+          <g transform="rotate(-90 165 732)">
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(237,241,248,0.10)" stroke-width="1.2" stroke-dasharray="2 14"/>
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="5" stroke-linecap="round" stroke-dasharray="240 3831" stroke-dashoffset="455"/>
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="5" stroke-linecap="round" stroke-dasharray="95 3976" stroke-dashoffset="160"/>
+            <circle cx="165" cy="732" r="648" fill="none" stroke="#f0a33f" stroke-width="5" stroke-linecap="round" stroke-dasharray="45 4026" stroke-dashoffset="45"/>
+          </g>
+          <circle cx="165" cy="84" r="4" fill="#ffd9a0" style="filter:drop-shadow(0 0 6px rgba(240,163,63,0.9))"/>
+          <circle cx="165" cy="84" r="9" fill="none" stroke="rgba(240,163,63,0.4)" stroke-width="1.2"/>
+        </svg>
+        <div class="pop-hud">
+          <div class="toprow" style="display:flex;align-items:center;gap:9px"><span class="cap" style="color:var(--ember)">Focus</span><span class="cdots"><i class="on"></i><i class="on"></i><i></i><i></i></span></div>
+          <div class="t big">24:53</div>
+          <div class="sub">3h 12m · in since 9:12</div>
+        </div>
+        <div class="pop-ctl">
+          <div class="c-s" style="width:30px;height:30px"><svg width="10" height="10" viewBox="0 0 13 13"><path d="M9 1.5 4 6.5l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="c-b" style="width:44px;height:44px;box-shadow:0 0 20px rgba(240,163,63,0.4)"><svg width="13" height="13" viewBox="0 0 22 22"><path d="M6 4h3v14H6zM13 4h3v14h-3z" fill="currentColor"/></svg></div>
+          <div class="c-s" style="width:30px;height:30px"><svg width="10" height="10" viewBox="0 0 13 13"><path d="M4 1.5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        </div>
+        <div class="pop-foot">
+          <div class="wkbtn"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 6h8v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM11 7h1.5a1.5 1.5 0 0 1 0 3H11M5 3.5v1M8 3v1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Break</div>
+          <div class="wkbtn"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M6 3H3.5v10H6M10 5.5 12.5 8 10 10.5M6.5 8h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Clock out</div>
+          <span class="sp"></span>
+          <div class="ic"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+          <div class="ic"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="3" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="13" cy="8" r="1.3" fill="currentColor"/></svg></div>
+        </div>
+      </div>
+      <p class="phlabel">Focus running — badge: <span class="mb-badge" style="display:inline-flex;font-size:11px"><span class="d"></span>24:53</span></p>
+      </div>
+
+      <div class="popcol">
+      <div class="popover">
+        <svg class="scene" viewBox="0 0 330 244">
+          <circle cx="70" cy="56" r="1" fill="rgba(237,241,248,0.6)"/>
+          <circle cx="290" cy="38" r="1.1" fill="rgba(237,241,248,0.5)"/>
+          <circle cx="200" cy="24" r="0.8" fill="rgba(237,241,248,0.45)"/>
+          <circle cx="250" cy="82" r="0.8" fill="rgba(237,241,248,0.35)"/>
+          <circle cx="165" cy="732" r="600" fill="#0a1220"/>
+          <circle cx="165" cy="732" r="600" fill="none" stroke="rgba(130,185,255,0.55)" stroke-width="2" style="filter:blur(1px)"/>
+          <circle cx="165" cy="732" r="604" fill="none" stroke="rgba(110,170,255,0.28)" stroke-width="10" style="filter:blur(7px)"/>
+          <ellipse cx="325" cy="170" rx="45" ry="22" fill="rgba(255,166,87,0.2)" style="filter:blur(12px)"/>
+          <g fill="#ffd9a0">
+            <circle cx="90" cy="190" r="1.3" opacity="0.85"/><circle cx="96" cy="193" r="0.8" opacity="0.5"/>
+            <circle cx="170" cy="206" r="1.4" opacity="0.9"/><circle cx="176" cy="209" r="0.9" opacity="0.55"/>
+            <circle cx="240" cy="194" r="1.1" opacity="0.7"/>
+            <circle cx="45" cy="209" r="0.9" opacity="0.5"/>
+          </g>
+          <g transform="rotate(-90 165 732)">
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(237,241,248,0.10)" stroke-width="1.2" stroke-dasharray="2 14"/>
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="5" stroke-linecap="round" stroke-dasharray="240 3831" stroke-dashoffset="455"/>
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(240,163,63,0.38)" stroke-width="5" stroke-linecap="round" stroke-dasharray="95 3976" stroke-dashoffset="160"/>
+            <circle cx="165" cy="732" r="648" fill="none" stroke="rgba(240,163,63,0.55)" stroke-width="5" stroke-linecap="round" stroke-dasharray="42 4029" stroke-dashoffset="42"/>
+          </g>
+          <circle cx="165" cy="84" r="4" fill="#ffd9a0" style="filter:drop-shadow(0 0 6px rgba(240,163,63,0.9))"/>
+          <circle cx="165" cy="84" r="9" fill="none" stroke="rgba(240,163,63,0.4)" stroke-width="1.2"/>
+        </svg>
+        <div class="pop-hud">
+          <div class="toprow" style="display:flex;align-items:center;gap:9px"><span class="cap" style="color:var(--ember)">Clocked in</span></div>
+          <div class="t big" style="font-size:32px">3:12:44</div>
+          <div class="sub">since 9:12 · last break 41m ago</div>
+        </div>
+        <div class="pop-ctl">
+          <div class="c-b" style="width:auto;height:40px;border-radius:100px;padding:0 16px;gap:7px;display:flex;align-items:center;box-shadow:0 0 20px rgba(240,163,63,0.35)"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><span style="font-size:12px;font-weight:700">Start focus</span></div>
+        </div>
+        <div class="pop-foot">
+          <div class="wkbtn"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 6h8v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM11 7h1.5a1.5 1.5 0 0 1 0 3H11M5 3.5v1M8 3v1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Break</div>
+          <div class="wkbtn"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M6 3H3.5v10H6M10 5.5 12.5 8 10 10.5M6.5 8h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Clock out</div>
+          <span class="sp"></span>
+          <div class="ic"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M2.5 13.5v-4M8 13.5V5.5M13.5 13.5V2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+          <div class="ic"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="3" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="13" cy="8" r="1.3" fill="currentColor"/></svg></div>
+        </div>
+      </div>
+      <p class="phlabel">Clocked in, no timer — explicit Start focus, no play glyph · badge: <span class="mb-badge" style="display:inline-flex;font-size:11px"><span class="d hollow"></span>3:12</span></p>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= LIVE ACTIVITY ================= -->
+  <div class="section">
+    <p class="kicker">05 · Live Activity</p>
+    <h2>Lock Screen &amp; Dynamic Island</h2>
+    <div class="larow">
+      <div class="lock">
+        <div class="mini">
+          <svg viewBox="0 0 52 52">
+            <circle cx="26" cy="88" r="70" fill="#0a1220"/>
+            <circle cx="26" cy="88" r="70" fill="none" stroke="rgba(130,185,255,0.5)" stroke-width="1.5" style="filter:blur(0.5px)"/>
+            <g transform="rotate(-90 26 88)">
+              <circle cx="26" cy="88" r="76" fill="none" stroke="rgba(240,163,63,0.35)" stroke-width="3" stroke-linecap="round" stroke-dasharray="40 437.5" stroke-dashoffset="58"/>
+              <circle cx="26" cy="88" r="76" fill="none" stroke="#f0a33f" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 463.5" stroke-dashoffset="14"/>
+            </g>
+            <circle cx="26" cy="12" r="2.5" fill="#ffd9a0" style="filter:drop-shadow(0 0 4px rgba(240,163,63,0.9))"/>
+          </svg>
+        </div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px"><span class="cap" style="color:var(--ember);font-size:9.5px">Focus</span><span class="cdots" style="gap:4px"><i class="on" style="width:5px;height:5px"></i><i class="on" style="width:5px;height:5px"></i><i style="width:5px;height:5px"></i><i style="width:5px;height:5px"></i></span></div>
+          <div class="t" style="font-size:26px;margin-top:3px;color:var(--ink)">24:53</div>
+        </div>
+        <div class="c-b" style="width:40px;height:40px;box-shadow:none"><svg width="12" height="12" viewBox="0 0 22 22"><path d="M6 4h3v14H6zM13 4h3v14h-3z" fill="currentColor"/></svg></div>
+      </div>
+      <div class="di">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--ember);box-shadow:0 0 6px rgba(240,163,63,0.8);flex:none"></span>
+        <span style="font-size:11px;font-weight:600;color:var(--ink-2)">Focus</span>
+        <span style="flex:1"></span>
+        <span class="t" style="font-size:15px;color:var(--ink)">24:53</span>
+      </div>
+    </div>
+    <p class="intro" style="margin-top:22px">The Lock Screen band is the orbit crop around the now-point with the cycle dots beside the label; the compact Island is the glowing dot plus the countdown. On break both cool to stone.</p>
+  </div>
+
+  <!-- ================= TOKENS ================= -->
+  <div class="section">
+    <p class="kicker">06 · Tokens</p>
+    <h2>The Orbit system — night · day</h2>
+    <div class="tokgrid">
+      <div class="tok"><div class="well"><i style="background:#070a10"></i><i style="background:#dfe9f2"></i></div><p class="n">Sky</p><p class="v">#070A10 · #DFE9F2</p><p class="u">Every canvas</p></div>
+      <div class="tok"><div class="well"><i style="background:#0e1420"></i><i style="background:#ffffff"></i></div><p class="n">Card</p><p class="v">#0E1420 · #FFFFFF</p><p class="u">Elevated surfaces</p></div>
+      <div class="tok"><div class="well"><i style="background:#f0a33f"></i><i style="background:#b3661a"></i></div><p class="n">Ember</p><p class="v">#F0A33F · #B3661A</p><p class="u">Arcs, transport, active state</p></div>
+      <div class="tok"><div class="well"><i style="background:#ffd9a0"></i><i style="background:#8a4d10"></i></div><p class="n">Dawn</p><p class="v">#FFD9A0 · #8A4D10</p><p class="u">Now-point, highlights</p></div>
+      <div class="tok"><div class="well"><i style="background:#7fb4e8"></i><i style="background:#8cc8ff"></i></div><p class="n">Atmosphere</p><p class="v">#7FB4E8 · #8CC8FF</p><p class="u">Planet rim only — never UI</p></div>
+      <div class="tok"><div class="well"><i style="background:#8a8578"></i><i style="background:#8a8578"></i></div><p class="n">Stone</p><p class="v">#8A8578</p><p class="u">Breaks, paused, clocked-out</p></div>
+      <div class="tok"><div class="well"><i style="background:#edf1f8"></i><i style="background:#16202e"></i></div><p class="n">Ink</p><p class="v">#EDF1F8 · #16202E</p><p class="u">Numerals, primary text</p></div>
+    </div>
+  </div>
+
+  <!-- ================= MOTION ================= -->
+  <div class="section">
+    <p class="kicker">07 · Motion</p>
+    <h2>How it moves</h2>
+    <div class="motion">
+      <div class="mo"><h4>The pulse</h4><p>The now-point breathes once per second while anything is recording — focus or plain clocked-in work. Paused or on break, it holds still.</p></div>
+      <div class="mo"><h4>Clock-in is a launch</h4><p>On clock-in the arc ignites from the limb and the camera eases up to orbit altitude — a 1.2&nbsp;s one-time ceremony.</p></div>
+      <div class="mo"><h4>Session end is a dawn</h4><p>Completion flashes the dawn glow across the rim; a cycle dot lights; the finished segment cools from Dawn to Ember and locks into the log.</p></div>
+      <div class="mo"><h4>The sun is real</h4><p>Black/Blue Marble textures (public domain) on a SceneKit sphere, terminator from real solar position, camera above your coarse location. The sky crossfades through golden hour at actual sunset.</p></div>
+      <div class="mo"><h4>Scrub the day</h4><p>Drag along the orbit to review the day; each segment lifts slightly under the finger and shows its times. Release springs back to now.</p></div>
+      <div class="mo"><h4>Reduced motion</h4><p>With Reduce Motion, the pulse, launch, and parallax collapse to opacity cross-fades; the scene renders as a static still.</p></div>
+    </div>
+  </div>
+
+  <p class="footnote">Orbit keeps every locked decision — SF semibold numerals, no emoji, one working accent, cycle progress as dots, Pomodoro and Workday unified on one orbit — and maps onto the existing architecture: the scene is one SwiftUI view over PomodoroEngine + WorkdayTracker, the popover reuses it with a landscape camera, and Stats/Settings restyle the shared views that already exist.</p>
+</div>

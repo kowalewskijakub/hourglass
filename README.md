@@ -22,7 +22,13 @@ Common to both platforms:
   the phone, the panel, the menu bar and the Live Activity cannot contradict
   each other.
 - **Editable history** — view, add, edit and delete every recorded focus session,
-  work break and clocked-in stretch, plus CSV export.
+  work break and clocked-in stretch, plus CSV export. Filter it by kind, by span
+  and by text, select rows in bulk, and delete or export just those. A workday
+  whose own row is filtered out still heads its matching rows, because the
+  section header is the only thing saying which day a row belongs to.
+- **Stats over the span you choose** — 7, 14 or 30 days drives the totals, the
+  per-day chart and the day shapes together, so the three can't answer about
+  three different periods.
 
 - **macOS** (Tahoe 26+) — one borderless menu-bar item whose mark and value
   change with state (fill = bounded vs open-ended, colour = work vs rest, and a
@@ -88,11 +94,20 @@ hourglass/
   an injected `PomodoroClock` and **`remaining` is always derived from a stored
   `endDate`**, never decremented — so the countdown is drift-free and stays
   correct across pauses, missed ticks, and system sleep / app suspension.
+  A phase that runs out **does not advance itself**: it records the session,
+  raises the alert, and keeps counting upward (`overrun`) until the user presses
+  Continue. Auto-start then decides whether the next phase begins on its own.
+  Pausing a focus is treated as taking a break, so the workday stops counting
+  that time as work rather than billing a coffee run.
 - `SettingsStore` (UserDefaults) and `HistoryStore` (JSON in Application Support),
   each behind a protocol with an in-memory fake for tests.
-- `StatisticsCalculator` — pure functions for daily totals, streaks, the 7-day
-  chart and the day's worked stretches, with an injectable calendar/date for
-  deterministic tests.
+- `StatisticsCalculator` — pure functions for daily totals, streaks, the per-day
+  chart, range roll-ups and the day's worked stretches, with an injectable
+  calendar/date for deterministic tests.
+- `HistoryFilter` — what History is narrowed to (kind, span, text) and what that
+  leaves, resolved against an injected `now`, calendar and locale. Also resolves
+  a set of selected row ids back to the records behind them, so a bulk delete
+  never asks the tracker to remove a break out of a workday it is also deleting.
 - **State axes** (`OrbitState`) — `WorkdayState` and `PomodoroState` are modelled
   separately and combined only in `OrbitPresentationResolver`, a pure function
   from a snapshot to everything the surfaces draw. Views never re-derive a label,

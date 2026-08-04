@@ -9,20 +9,27 @@ import HourglassCore
 struct DayStripesView: View {
     let spans: [StatisticsCalculator.DailyClockSpan]
     let now: Date
+    /// Thirty rows at the seven-day rhythm is a scroll, not a shape. Compact
+    /// tightens the rows so a month still reads as one block.
+    var compact: Bool = false
     var calendar: Calendar = .current
 
     @Environment(\.colorScheme) private var colorScheme
 
     private var palette: OrbitPalette { .system(colorScheme) }
 
+    private var rowSpacing: CGFloat { compact ? 3 : 8 }
+    private var trackHeight: CGFloat { compact ? 5 : 6 }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: rowSpacing) {
             ForEach(spans) { span in
                 HStack(spacing: 8) {
                     Text(weekdayInitial(span.date))
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 12, alignment: .leading)
+                        .opacity(compact && !startsWeek(span.date) ? 0.45 : 1)
                         .accessibilityHidden(true)
 
                     GeometryReader { proxy in
@@ -47,7 +54,7 @@ struct DayStripesView: View {
                             }
                         }
                     }
-                    .frame(height: 6)
+                    .frame(height: trackHeight)
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(label(for: span)))
@@ -62,6 +69,12 @@ struct DayStripesView: View {
 
     private func weekdayInitial(_ date: Date) -> String {
         date.formatted(.dateTime.weekday(.narrow))
+    }
+
+    /// The first day of the user's week, whichever day that is for them — the
+    /// only marker a month of narrow initials has to break it into weeks.
+    private func startsWeek(_ date: Date) -> Bool {
+        calendar.component(.weekday, from: date) == calendar.firstWeekday
     }
 
     private func label(for span: StatisticsCalculator.DailyClockSpan) -> String {

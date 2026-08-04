@@ -49,7 +49,7 @@ import ActivityKit
 extension TimerActivityAttributes.ContentState {
     var title: String {
         switch mode {
-        case .timer: return kind.displayName
+        case .timer: return kind.phaseName
         case .clockedIn: return "Clocked in"
         case .onBreak: return "Work break"
         }
@@ -59,7 +59,7 @@ extension TimerActivityAttributes.ContentState {
     /// counting.
     var subtitle: String {
         switch mode {
-        case .timer: return kind.displayName
+        case .timer: return kind.phaseName
         case .clockedIn: return "Working — no timer running"
         case .onBreak: return "Excluded from work total"
         }
