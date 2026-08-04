@@ -22,8 +22,8 @@ struct HourglassPanel: View {
         return TimelineView(.periodic(from: .now, by: 1)) { context in
             let now = context.date
             let presentation = model.orbitPresentation(now: now, surface: .panel)
-            let palette: OrbitPalette =
-                model.daylight.isNight(at: now, mode: model.settings.skyMode) ? .night : .day
+            let sky = model.daylight.sky(at: now, mode: model.settings.skyMode)
+            let palette = sky.palette
 
             ZStack(alignment: .topLeading) {
                 OrbitSceneView(
@@ -32,7 +32,7 @@ struct HourglassPanel: View {
                     now: now,
                     window: traceWindow(now: now),
                     crop: .landscape,
-                    isDaylight: !palette.isNight
+                    sky: sky
                 )
 
                 hud(presentation, palette: palette)

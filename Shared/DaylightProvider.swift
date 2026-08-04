@@ -37,14 +37,13 @@ final class DaylightProvider {
         manager.distanceFilter = 25_000 // a sunrise does not move street to street
     }
 
-    /// Whether the scene should paint the night sky.
-    func isNight(at instant: Date, mode: SkyMode, calendar: Calendar = .current) -> Bool {
-        switch mode {
-        case .alwaysNight: return true
-        case .alwaysDay: return false
-        case .followSun:
-            return !SolarClock.isDaylight(at: instant, coordinate: coordinate, calendar: calendar)
-        }
+    /// The sky the scene paints at `instant`: its phase, its colours, and where
+    /// the sun stands over the face on screen.
+    ///
+    /// One value rather than a day/night flag, because the scene draws a whole
+    /// day now. The chrome still gets its two-way answer, from `sky.isNight`.
+    func sky(at instant: Date, mode: SkyMode, calendar: Calendar = .current) -> OrbitSky {
+        OrbitSky(at: instant, coordinate: coordinate, mode: mode, calendar: calendar)
     }
 
     /// Ask for location, but only if following the sun would actually use it.

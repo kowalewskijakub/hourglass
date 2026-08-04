@@ -33,24 +33,45 @@ Common to both platforms:
   Activity** (Lock Screen + Dynamic Island) in the same state grammar, ticking
   off the device clock; wall-clock accurate across backgrounding with a
   look-ahead local notification.
-- **Sky** — the Orbit scene alone follows local daylight (`SolarClock`, coarse
-  location, 06:00–18:00 fallback). Stats, History and Settings follow the system
+- **Sky** — the Orbit scene alone follows the local sun, through the whole day
+  rather than a day/night switch (`SolarClock`, coarse location, equatorial
+  06:00–18:00 fallback). Stats, History and Settings follow the system
   appearance, so a sunset never flips the information UI.
+
+### The phases of the day
+
+The scene is a continuous function of the sun's **elevation**, not of a daylight
+flag. `SolarClock.position` gives that elevation, its declination and its hour
+angle; `SolarPhase` names the fourteen stretches it passes through at the
+conventional twilight angles — `night`, `astronomicalDawn`, `nauticalDawn`,
+`civilDawn`, `sunrise`, `goldenMorning`, `morning`, `noon`, and their mirror
+through the afternoon to `astronomicalDusk`.
+
+`OrbitSky` turns that into the scene: a three-stop sky gradient blended between
+altitude anchors, a star field that fades in across twilight, the limb rim, and
+the sun's own glow tracking along the horizon. Nothing steps — every colour is
+interpolated — but the sky is materially different every half hour, and dawn is
+rose where dusk is amber, at the same sun height.
+
+The **chrome** still gets a two-way answer, from `OrbitSky.isNight`, and it flips
+at +2° rather than at the horizon. That figure is measured, not chosen: it is
+where the two inks' contrast against the sky crosses over. A sunrise sky passes
+through a mid slate neither ink is comfortable on, so switching at the crossing
+is the most legible thing available — never below 4:1, against 3.1:1 for a flip
+at sunset.
 
 ### Photographic Earth
 
-The planet renders real Earth imagery, blended across the day/night terminator
-and turning with the time of day. `OrbitPlanetTexture` reads two images from each
-app's asset catalog, and falls back to a procedural planet if they are absent —
-so removing them is a supported way to ship without imagery:
+The planet renders real Earth imagery, centred on the viewer's own meridian and
+parallel and lit where the sun is actually lighting it. `OrbitPlanetTexture`
+reads two images from each app's asset catalog, and falls back to a procedural
+planet if they are absent — so removing them is a supported way to ship without
+imagery:
 
 | Asset name | What it is |
 | --- | --- |
 | `OrbitEarthDay` | Equirectangular (plate carrée) colour map, 2:1, longitude −180…180 left to right |
 | `OrbitEarthNight` | Same projection and size, city lights on black. Optional — without it the night side simply darkens |
-
-`OrbitPlanetTexture` picks them up automatically; the scene then blends the two
-across the terminator and turns the visible face with the time of day.
 
 Both apps currently ship NASA imagery, downscaled to 2048 × 1024 (~440 KB total
 per app):
@@ -62,6 +83,122 @@ per app):
 
 NASA content is generally not copyrighted and may be used for any purpose; NASA
 asks that it be credited, which the app does in Settings → Workday.
+
+### A real sphere
+
+The planet is projected, not pasted. [`OrbitGlobe.metal`](Shared/OrbitGlobe.metal)
+maps every pixel of the disc onto the ball, rotates it in three dimensions and
+reads the map there. So the ground foreshortens as it runs away to the horizon,
+continents curve over the limb, and the poles behave like poles.
+
+The planet is a **horizon**: a body far larger than the crop, with about a third
+of the phone's height given to the curve of it. What is on screen is a shallow
+band up near the limb, which makes the visible face an **orbital horizon view** —
+the ground below you, stretching away and compressing as it goes.
+
+That is a deliberate limit, and it was tested against the alternative. Pulling the
+planet back until the whole ball fits does buy a ring that passes in front of the
+world and hides behind it, and it was built and looked at — but it costs the
+horizon the scene is built on: the sky above it carries the HUD, the light on it
+carries the hour, and a ball floating in the middle is a different scene rather
+than a better-drawn version of this one. The horizon stays; the orbit leans
+instead.
+
+**Which slice of the world you see** is `SceneGeometry.aimAngle`, how far out from
+the point below the viewer their own latitude is placed. The horizon lands at
+`viewerLatitude + (90 − aimAngle)` and the bottom of the screen at roughly
+`viewerLatitude − (aimAngle − 38)`. Raise it to look toward the equator, lower it
+toward the pole. At 68° a viewer in Warsaw gets about 17°N–74°N: Europe through
+the middle, the Sahara along the bottom, a rind of ice at the top. At 53° they got
+39°N–89°N and spent the whole top half of the scene on Arctic ice. Longitude needs
+no such choice — the globe is aimed at the viewer's own meridian.
+
+### The orbit
+
+The track is a **circle in space around the planet**, concentric with it, tipped
+slightly out of the screen plane and projected the same way the planet is.
+
+Concentric came first, and mattered on its own: the track used to be a separate
+circle with its own centre and a tighter radius, which on the panel sat 5 pt above
+the limb at the middle of the screen and 28 pt at the edges. The two curves
+disagreed about where the world was, and the result read as an arc drawn over a
+planet rather than a path around one.
+
+The **tilt** is what stops it reading as a line ruled parallel to that horizon.
+`orbitTilt` leans the ring out of the screen, so its right-hand side stands nearer
+the viewer than its left and the arc becomes a true ellipse; `orbitRoll` then tips
+it within the screen, so one end of the arc sits clear of the other — about 50 pt
+across the phone. `apexAngle` measures angles from the crop's high point rather
+than the ring's, which keeps the satellite marking *now* at the middle of the
+scene while the arc leans around it.
+
+The **near half is the left one**, which is the half the day's trace runs down. So
+the trace is drawn *over* the world rather than swallowed by it, and the track is
+unbroken from the left edge of the crop right up to now. Putting the near side on
+the right looked identical on the phone — nothing is occluded there — but on the
+panel it cut the oldest work off in mid-air.
+
+Where **now** sits along the ring is per-crop for the same reason. The phone only
+needs the satellite in the middle of the crop, which is the ring's high point once
+it is rolled. The panel needs it on the near/far boundary exactly: anywhere past
+it and the newest work is on the far side, so the trace is cut short and the
+satellite floats away from the end of its own arc.
+
+The rest is per-crop too, because the two crops answer to different limits. On the
+**phone** the track never reaches the world, so the ceiling is geometric — a
+tipped ring is narrower than the circle it came from, so reaching the edge of the
+screen means going further round it, where it has dropped further. With 79 pt of
+altitude it tolerates about 54° and takes 45°.
+
+The **panel** is allowed to overlap, which removes that ceiling. It takes 36° over
+a planet at 0.90 of the crop's width, and there the limit is the footer instead:
+the track has to still be above it when it reaches the left edge of the window, so
+that the orbit visibly *starts* there rather than diving under the chrome. At 36°
+and a 5° roll it arrives with about 8 pt to spare, over the Earth and on the near
+side, so it is drawn.
+
+Being in orbit, the track goes where the planet goes: dragging the globe carries
+the ring and its satellite with it, through the flick and all the way home.
+
+The **terminator** comes free with the projection. Once a pixel knows its own
+point on the sphere, the sun's height there is one dot product against the
+subsolar direction — so day and night meet along a real curve across a real ball,
+and the city lights are masked by that same curve, coming up across a continent
+through the evening rather than all at once.
+
+**The globe is a thing you can pick up.** Dragging sideways turns it about its own
+poles, scaled by the foreshortening where the finger actually is so the surface
+keeps up instead of crawling. Dragging up and down shoves the whole planet — the
+one object in the scene that behaves like an object. Both ends of that travel are
+elastic, using the usual rubber band, so it can always be pulled a little past its
+stop and never comes off it. The travel is deliberately short (9% of the crop):
+under the old horizon composition a long pull was the only way to see more of the
+ball and was worth 42%, but the whole body is in view now, so all a long pull
+would do is post the planet behind the HUD.
+
+Everything belonging to the body — the sphere, its rim, the glow on its horizon,
+the ring around it — is drawn from one lifted geometry, so they move as one. The
+aim is deliberately *not*: shoving the ball around must never quietly re-point it.
+
+**It turns for home the moment it is let go of**, over about a second and a half —
+so the scene is always explorable and never left wrong about where the light is. A
+flick still carries, but it carries *into* the way home rather than stopping
+somewhere and waiting there: the coast lasts however long the throw is worth, up
+to 0.7 s, and is exactly zero when the release had no speed in it. Nothing ever
+holds the globe still away from home. That return is walked in steps rather than
+handed to one long animation, so a finger landing mid-return picks the globe up
+where it looks instead of snapping. The gesture is confined to
+the planet's own disc, wherever that disc has been pushed to, so the HUD above is
+untouched. Reduce Motion keeps the direct manipulation and drops the momentum; on
+macOS the pointer takes a grab cursor over the globe, since a cursor has to be told
+a thing can be picked up before anyone tries.
+
+On the **panel** the earth sits a tenth of the crop higher than it first did: with
+the footer taking the bottom 50 pt, it had only about 100 pt of its own, which was
+not enough of it to be worth looking at. The track stays where it is — there is
+only about 15 pt of clear sky between the pills and the limb, and raising it puts
+the satellite behind a pill, which is worse than letting it graze the horizon it
+is flying over.
 
 ## Architecture
 
@@ -75,6 +212,7 @@ hourglass/
 │   ├── Sources/HourglassCoreSelfCheck/  # `swift run` smoke test (no Xcode needed)
 │   └── Tests/HourglassCoreTests/        # Swift Testing suite
 ├── Shared/                     # cross-platform SwiftUI (Orbit scene + face, pill,
+│                               #   OrbitGlobe.metal — the projected sphere,
 │                               #   workday rail, stats, history, settings, AppModel)
 ├── Apps/macOS/                 # custom NSStatusItem + AppKit windows + notifier
 ├── Apps/iOS/                   # tabs + timer + notifications + LiveActivityController
@@ -102,8 +240,11 @@ hourglass/
   per-transition handlers, because the transitions arrive repeatedly and out of
   order (callback, foreground, sync pull, cold-launch restore); converging on the
   state cannot open a second break, and a handler per transition did.
-- `SolarClock` — pure sunrise/sunset (NOAA), including the polar cases, with a
-  fixed 06:00 / 18:00 fallback when no coordinate is available.
+- `SolarClock` — pure sunrise/sunset (NOAA) including the polar cases, plus the
+  sun's elevation, declination and hour angle at an instant, and `SolarPhase` to
+  name the stretch of day that elevation falls in. With no coordinate it stands
+  on the equator at the time zone's own longitude, which keeps the documented
+  06:00–18:00 day while still giving the scene a real sun to raise and set.
 
 The apps are thin: a shared `AppModel` owns the engine + stores, and each platform
 wires its own notification/sound behaviour onto the engine's callbacks.
@@ -131,6 +272,12 @@ argument for the inverse — a dark mark on an ember field.
 - **macOS 26+ (Tahoe)** for the Mac app (required for Liquid Glass); **iOS 17+**
   for the iOS app (Live Activities need 16.1+; Liquid Glass applies on iOS 26+).
 - Xcode 26, Swift 6.
+- The **Metal toolchain**, which Xcode 26 no longer installs by default and which
+  the globe's shader needs. If the build stops at `cannot execute tool 'metal'`:
+
+  ```bash
+  xcodebuild -downloadComponent MetalToolchain
+  ```
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 - The iOS build embeds a WidgetKit extension (`Hourglass-iOSWidgets`) for the Live
   Activity.

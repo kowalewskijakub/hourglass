@@ -143,6 +143,104 @@ public enum SolarClock {
         return hour >= fallbackSunriseHour && hour < fallbackSunsetHour
     }
 
+    /// The place the scene stands in when no coordinate is known: the equator, at
+    /// the longitude the time zone implies.
+    ///
+    /// Chosen so the fallback still means what it has always meant — on the
+    /// equator the sun rises near six and sets near six all year — while giving
+    /// the scene a *real* sun to raise, lower and cast a terminator with, instead
+    /// of a switch that flips at two fixed hours.
+    public static func fallbackCoordinate(
+        for timeZone: TimeZone,
+        at instant: Date = Date()
+    ) -> Coordinate {
+        // 15° of longitude per hour, so 240 seconds of offset per degree.
+        Coordinate(latitude: 0, longitude: Double(timeZone.secondsFromGMT(for: instant)) / 240)
+    }
+
+    // MARK: Position
+
+    /// Where the sun stands at one instant, seen from one place.
+    ///
+    /// The scene needs more than "is it up". The elevation angle is what makes a
+    /// dawn look like a dawn rather than a switch being thrown, and the
+    /// declination and hour angle are what let it sweep a terminator across a
+    /// globe the user can spin — the sun's height at a *neighbouring* longitude
+    /// is the same formula with the hour angle shifted, and nothing else.
+    public struct Position: Sendable, Equatable {
+        /// Elevation above the horizon in degrees; negative below it.
+        public let altitude: Double
+        /// The sun's declination in degrees — how far the terminator leans.
+        public let declination: Double
+        /// Degrees turned past local solar noon, 15° to the hour: negative in the
+        /// morning, positive in the afternoon, wrapped to −180…180.
+        public let hourAngle: Double
+
+        /// Hours from local solar noon, for the reader who thinks in time.
+        public var hoursFromNoon: Double { hourAngle / 15 }
+
+        /// The named stretch of the day this position falls in.
+        public var phase: SolarPhase { SolarPhase(altitude: altitude, hourAngle: hourAngle) }
+    }
+
+    /// The sun's position at `instant`, seen from `coordinate`.
+    ///
+    /// The low-precision solar coordinates from the Astronomical Almanac: good to
+    /// about an arcminute for a century either side of 2000, which is orders of
+    /// magnitude finer than an ambient scene can show.
+    public static func position(at instant: Date, coordinate: Coordinate) -> Position {
+        let d = julianDay(instant) - 2_451_545.0
+
+        let meanAnomaly = radians(357.529 + 0.98560028 * d)
+        let meanLongitude = 280.459 + 0.98564736 * d
+        let eclipticLongitude = radians(
+            meanLongitude + 1.915 * sin(meanAnomaly) + 0.020 * sin(2 * meanAnomaly)
+        )
+        let obliquity = radians(23.439 - 0.00000036 * d)
+
+        let declination = asin(sin(obliquity) * sin(eclipticLongitude))
+        let rightAscension = degrees(
+            atan2(cos(obliquity) * sin(eclipticLongitude), cos(eclipticLongitude))
+        )
+
+        // Greenwich mean sidereal time: which meridian is facing the stars, and
+        // so — once the sun's right ascension is subtracted — the sun.
+        let greenwichSidereal = (18.697374558 + 24.06570982441908 * d)
+            .truncatingRemainder(dividingBy: 24) * 15
+        let hourAngle = wrapped(greenwichSidereal + coordinate.longitude - rightAscension)
+
+        return Position(
+            altitude: altitude(
+                latitude: coordinate.latitude,
+                declination: degrees(declination),
+                hourAngle: hourAngle
+            ),
+            declination: degrees(declination),
+            hourAngle: hourAngle
+        )
+    }
+
+    /// The sun's elevation at a place whose solar noon is `hourAngle` degrees
+    /// away, in degrees.
+    ///
+    /// Split out from `position` because the scene calls it once per sample
+    /// across the visible face: the terminator is this curve read left to right,
+    /// and paying for a full solar solution at every sample would be waste.
+    public static func altitude(latitude: Double, declination: Double, hourAngle: Double) -> Double {
+        let phi = radians(latitude)
+        let delta = radians(declination)
+        let h = radians(hourAngle)
+        return degrees(asin(sin(phi) * sin(delta) + cos(phi) * cos(delta) * cos(h)))
+    }
+
+    /// Folds an angle into −180…180.
+    private static func wrapped(_ angle: Double) -> Double {
+        var value = angle.truncatingRemainder(dividingBy: 360)
+        if value > 180 { value -= 360 }
+        if value < -180 { value += 360 }
+        return value
+    }
+
     // MARK: Julian conversions
 
     private static func julianDay(_ date: Date) -> Double {
@@ -155,6 +253,72 @@ public enum SolarClock {
 
     private static func radians(_ degrees: Double) -> Double { degrees * .pi / 180 }
     private static func degrees(_ radians: Double) -> Double { radians * 180 / .pi }
+}
+
+/// A named stretch of the day, read off the sun's elevation.
+///
+/// Fourteen of them rather than two, because day and night are the only parts of
+/// a day a scene *cannot* make anything of: everything worth looking at — the
+/// blue hour, the rose of a sunrise, the long gold of an evening — happens in
+/// between. The boundaries are the conventional twilight angles, so each name
+/// means what an almanac means by it, and a phase is never a matter of taste.
+public enum SolarPhase: String, Sendable, Equatable, Hashable, CaseIterable, Codable {
+    /// Sun below −18°: no trace of it left in the sky.
+    case night
+    case astronomicalDawn, nauticalDawn, civilDawn
+    case sunrise, goldenMorning, morning
+    case noon
+    case afternoon, goldenEvening, sunset
+    case civilDusk, nauticalDusk, astronomicalDusk
+
+    /// The horizon, allowing for the sun's own width and for refraction — the
+    /// same −0.833° that decides sunrise and sunset above.
+    public static let horizonAltitude = -0.833
+
+    public init(altitude: Double, hourAngle: Double) {
+        // Solar noon exactly is the top of the climb, so it belongs to the
+        // rising half — a sun at its highest must never be called a sunset.
+        let rising = hourAngle <= 0
+        switch altitude {
+        case ..<(-18):
+            self = .night
+        case ..<(-12):
+            self = rising ? .astronomicalDawn : .astronomicalDusk
+        case ..<(-6):
+            self = rising ? .nauticalDawn : .nauticalDusk
+        case ..<Self.horizonAltitude:
+            self = rising ? .civilDawn : .civilDusk
+        case ..<6:
+            self = rising ? .sunrise : .sunset
+        case ..<12:
+            self = rising ? .goldenMorning : .goldenEvening
+        default:
+            // Only an hour either side of the sun's own noon, which in winter at
+            // a high latitude never arrives at all — and shouldn't.
+            self = abs(hourAngle) <= 15 ? .noon : (rising ? .morning : .afternoon)
+        }
+    }
+
+    /// Whether the sun is above the horizon in this phase.
+    public var isSunUp: Bool {
+        switch self {
+        case .sunrise, .goldenMorning, .morning, .noon, .afternoon, .goldenEvening, .sunset:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether the sun is below the horizon but still lighting the sky.
+    public var isTwilight: Bool {
+        switch self {
+        case .astronomicalDawn, .nauticalDawn, .civilDawn,
+             .civilDusk, .nauticalDusk, .astronomicalDusk:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// Which sky the Orbit scene shows. Only the Orbit scene follows this — Stats,

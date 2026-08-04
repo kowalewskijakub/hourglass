@@ -26,7 +26,8 @@ struct OrbitFaceView: View {
         return TimelineView(.periodic(from: .now, by: 1)) { context in
             let now = context.date
             let presentation = model.orbitPresentation(now: now, surface: .phone)
-            let palette = palette(at: now)
+            let sky = model.daylight.sky(at: now, mode: model.settings.skyMode)
+            let palette = sky.palette
 
             ZStack(alignment: .top) {
                 OrbitSceneView(
@@ -35,7 +36,7 @@ struct OrbitFaceView: View {
                     now: now,
                     window: traceWindow(now: now),
                     crop: .portrait,
-                    isDaylight: !palette.isNight
+                    sky: sky
                 )
                 .ignoresSafeArea()
 
@@ -103,10 +104,6 @@ struct OrbitFaceView: View {
     }
 
     // MARK: Scene inputs
-
-    private func palette(at now: Date) -> OrbitPalette {
-        model.daylight.isNight(at: now, mode: model.settings.skyMode) ? .night : .day
-    }
 
     /// How far back the visible track reaches: the day so far, widened to at
     /// least two hours so a fresh clock-in is not a single dot, and capped so a
