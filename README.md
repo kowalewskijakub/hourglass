@@ -156,12 +156,19 @@ tipped ring is narrower than the circle it came from, so reaching the edge of th
 screen means going further round it, where it has dropped further. With 79 pt of
 altitude it tolerates about 54° and takes 45°.
 
-The **panel** is allowed to overlap, which removes that ceiling. It takes 36° over
-a planet at 0.90 of the crop's width, and there the limit is the footer instead:
-the track has to still be above it when it reaches the left edge of the window, so
-that the orbit visibly *starts* there rather than diving under the chrome. At 36°
-and a 5° roll it arrives with about 8 pt to spare, over the Earth and on the near
-side, so it is drawn.
+The **panel** is allowed to overlap the world, which removes that ceiling — but
+it has a tighter one of its own: the band of clear sky between the bottom of the
+context pills and the top of the footer. That band is 72 pt, and both the visible
+globe and the whole arc have to live in it. The satellite has to clear the pills,
+so the apex is pinned just below them, and the track has to still be above the
+footer when it reaches the left edge of the window, so that the orbit visibly
+*starts* there rather than diving under the chrome.
+
+Those two pins leave the arc about 62 pt to fall in, and a shallow fall needs a
+*large* orbit radius — which is why the panel's planet is as big as it is. Making
+the globe smaller makes the arc steeper, not gentler: at 0.81 of the crop's width
+the most tilt that still clears the footer is 8°, against 22° at 0.95. The panel
+takes 0.95 and 22°.
 
 Being in orbit, the track goes where the planet goes: dragging the globe carries
 the ring and its satellite with it, through the flick and all the way home.

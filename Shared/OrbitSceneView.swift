@@ -659,13 +659,13 @@ struct SceneGeometry: Equatable {
         // built on that horizon — the sky above it carries the HUD, the light on
         // it carries the hour — and a whole ball floating in the middle is a
         // different scene, not a better-drawn version of this one.
-        let planetTop = height * (crop == .portrait ? 0.70 : 0.52)
-        planetRadius = width * (crop == .portrait ? 1.18 : 0.81)
+        let planetTop = height * (crop == .portrait ? 0.70 : 0.63)
+        planetRadius = width * (crop == .portrait ? 1.18 : 0.95)
         restingPlanetCenter = CGPoint(x: width / 2, y: planetTop + planetRadius)
 
         // The track is a **concentric** ring around that planet, at one constant
         // altitude, so it runs with the horizon rather than across it.
-        let apexY = height * (crop == .portrait ? 0.61 : 0.50)
+        let apexY = height * (crop == .portrait ? 0.61 : 0.59)
         orbitRadius = max(
             planetRadius + Self.minimumAltitude,
             restingPlanetCenter.y - apexY
@@ -681,7 +681,7 @@ struct SceneGeometry: Equatable {
         // left edge of the crop right up to now. Positive put the near side on
         // the right, which looked the same on the phone — nothing is occluded
         // there — but on the panel it cut the oldest work off in mid-air.
-        orbitTilt = (crop == .portrait ? -45.0 : -30.0) * .pi / 180
+        orbitTilt = (crop == .portrait ? -45.0 : -22.0) * .pi / 180
         orbitRoll = (crop == .portrait ? 7.0 : 5.0) * .pi / 180
 
         // Where *now* sits along the ring, and the two crops want different
