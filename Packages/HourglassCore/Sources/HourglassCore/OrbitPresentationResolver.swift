@@ -99,6 +99,9 @@ public enum OrbitPresentationResolver {
         case pomodoroBreakStaged(SessionKind)
         /// The break countdown reached zero and the user has not come back yet.
         case breakComplete(SessionKind)
+        /// The phase ran past its planned end and is counting on, waiting for
+        /// the user to continue. Nothing advances on its own any more.
+        case overrun(SessionKind)
         case manualBreak
     }
 
@@ -112,6 +115,8 @@ public enum OrbitPresentationResolver {
         switch pomodoro {
         case .running(let kind, _):
             return kind.isBreak ? .pomodoroBreakRunning(kind) : .focusRunning
+        case .overrun(let kind, _):
+            return .overrun(kind)
         case .paused(let kind, _):
             return kind.isBreak ? .pomodoroBreakPaused(kind) : .focusPaused
         case .ready(let kind, _):
@@ -140,10 +145,16 @@ public enum OrbitPresentationResolver {
             contextPills: pills,
             workdayRail: rail,
             clockOut: clockOut(state, snapshot),
+            endPomodoro: endPomodoroAction(state, snapshot),
             controls: controls(state, snapshot),
+            // Only Pomodoro joins the footer. Clock in, Back to work and
+            // Continue are each the one thing to do on an otherwise quiet
+            // screen, and shrinking them into the control strip took the whole
+            // point out of them.
+            primaryPlacement: state == .working ? .footer : .hero,
             sceneMode: sceneMode(for: state),
             menuBarBadge: badge(state, snapshot),
-            overflowActions: overflow(state, snapshot.locale),
+            overflowActions: overflow(state, snapshot),
             accessibilitySummary: summary(state, snapshot, numeral: numeral, rail: rail),
             canStartManualBreak: snapshot.workday.isWorking && snapshot.pomodoro.isIdle,
             clockOutNeedsConfirmation: snapshot.pomodoro.exists || snapshot.workday.isOnBreak
@@ -161,12 +172,20 @@ public enum OrbitPresentationResolver {
             return Copy.clockedIn(locale)
         case .focusRunning, .focusStaged:
             return Copy.focus(locale)
+        // A paused focus *is* a break — see `PomodoroWorkdayCoordinator.isResting`,
+        // which opens a real rest for it — so it is named like one rather than
+        // being a fourth thing the user has to hold in their head.
         case .focusPaused:
-            return Copy.focusPaused(locale)
+            return Copy.breakPhase(.focus, locale)
         case .pomodoroBreakRunning(let kind), .pomodoroBreakStaged(let kind):
             return Copy.breakPhase(kind, locale)
         case .pomodoroBreakPaused(let kind):
             return Copy.breakPhasePaused(kind, locale)
+        // A finished phase is still that phase — the numeral has already turned
+        // around and put a "+" in front of itself, which says everything a word
+        // like "done" would have, without inventing a fourth state name.
+        case .overrun(let kind):
+            return kind == .focus ? Copy.focus(locale) : Copy.breakPhase(kind, locale)
         case .breakComplete:
             return Copy.breakComplete(locale)
         case .manualBreak:
@@ -178,6 +197,8 @@ public enum OrbitPresentationResolver {
         switch state {
         case .clockedOut: return .dim
         case .working, .focusRunning, .focusStaged: return .ember
+        // A finished focus is still work being done; a finished break is not.
+        case .overrun(let kind): return kind == .focus ? .ember : .stone
         case .focusPaused, .pomodoroBreakRunning, .pomodoroBreakPaused,
              .pomodoroBreakStaged, .breakComplete, .manualBreak:
             return .stone
@@ -236,6 +257,19 @@ public enum OrbitPresentationResolver {
                     TimeFormatting.spoken(remaining, locale: locale), locale)
             )
 
+        case .overrun(let kind):
+            // Counting the other way now, and marked as such: "+02:14" is a
+            // different number from "02:14" and must not be misread as time
+            // left. The sign is the whole message.
+            let over = snapshot.pomodoro.overrun
+            return NumeralPresentation(
+                text: "+" + TimeFormatting.clock(over),
+                kind: .overrun,
+                tone: kind == .focus ? .ember : .stone,
+                accessibilityLabel: Copy.overrunSpoken(
+                    TimeFormatting.spoken(over, locale: locale), locale)
+            )
+
         case .breakComplete:
             return NumeralPresentation(
                 text: TimeFormatting.clock(0),
@@ -263,20 +297,30 @@ public enum OrbitPresentationResolver {
 
     // MARK: Cycle dots
 
-    /// Dots belong to the focus cycle. A break already says what it is, and the
-    /// dots would only repeat the position the break itself implies.
+    /// Dots belong to the *cycle*, so they stay up for every phase in it —
+    /// including the breaks.
+    ///
+    /// They used to be hidden during a break on the grounds that the break
+    /// implies its own position. It does not: "how far through the set am I"
+    /// is exactly the question a break is the moment to ask, and having the row
+    /// vanish and come back each time a focus ended read as the app losing
+    /// count. Only a workday with no cycle running has nothing to show.
     private static func cycleDots(_ state: State, _ snapshot: OrbitSnapshot) -> CycleDotsPresentation? {
         switch state {
-        case .focusRunning, .focusPaused, .focusStaged:
+        case .clockedOut, .working, .manualBreak:
+            return nil
+        case .focusRunning, .focusPaused, .focusStaged, .overrun,
+             .pomodoroBreakRunning, .pomodoroBreakPaused, .pomodoroBreakStaged, .breakComplete:
             let total = max(1, snapshot.sessionsUntilLongBreak)
             let completed = min(total, max(0, snapshot.focusesCompletedInCycle))
             return CycleDotsPresentation(
                 completed: completed,
                 total: total,
-                accessibilityLabel: Copy.cycle(completed + 1, total, snapshot.locale)
+                // The same tone the state label takes, so the two read as one
+                // line rather than as a grey word beside an ember row of dots.
+                tone: tone(for: state),
+                accessibilityLabel: Copy.cycle(min(total, completed + 1), total, snapshot.locale)
             )
-        default:
-            return nil
         }
     }
 
@@ -332,55 +376,19 @@ public enum OrbitPresentationResolver {
             )
             return phone ? [ends] : [ends, workdayTotalPill(snapshot)]
 
-        case .focusPaused:
-            let time = TimeFormatting.timeOfDay(snapshot.pausedAt ?? snapshot.now, locale: locale, timeZone: snapshot.calendar.timeZone)
-            let since = ContextPillPresentation(
-                id: "pausedSince",
-                icon: .pause,
-                full: Copy.sinceFull(time, locale),
-                compact: Copy.sinceCompact(time, locale),
-                accessibilityLabel: Copy.pausedSinceSpoken(time, locale),
-                tone: .stone
-            )
-            return phone ? [since] : [since, workdayTotalPill(snapshot)]
+        case .overrun, .focusPaused, .manualBreak,
+             .pomodoroBreakRunning, .pomodoroBreakStaged, .pomodoroBreakPaused, .breakComplete:
+            // Exactly one, in every kind of rest: how the day is going.
+            //
+            // It is the one fact a break does not already carry. The label names
+            // the phase, the numeral counts it down and the rail says how long
+            // the rest has run — but the running total is the thing you actually
+            // want while deciding whether to go back, and it is the only number
+            // on the surface that stops moving during a break. ("Next · Focus
+            // 25m" announced a phase the user cannot act on from here, and
+            // "Work break" restated the label beside it.)
+            return [workdayTotalPill(snapshot)]
 
-        case .pomodoroBreakRunning, .pomodoroBreakStaged, .pomodoroBreakPaused, .breakComplete:
-            let duration = TimeFormatting.compact(snapshot.nextFocusDuration, locale: locale)
-            let next = ContextPillPresentation(
-                id: "nextFocus",
-                icon: .focus,
-                full: Copy.nextFocusFull(duration, locale),
-                compact: Copy.nextFocusCompact(duration, locale),
-                accessibilityLabel: Copy.nextFocusSpoken(duration, locale),
-                tone: .stone
-            )
-            // "Work break" is additive on the panel — the label there says
-            // "Short break", so this is the *workday* accounting, not a repeat.
-            let linked = ContextPillPresentation(
-                id: "linkedWorkBreak",
-                icon: .cup,
-                full: Copy.restingLabel(locale),
-                compact: Copy.restingLabel(locale),
-                accessibilityLabel: Copy.linkedBreakSpoken(locale),
-                tone: .stone
-            )
-            return phone ? [next] : [linked, next]
-
-        case .manualBreak:
-            // The numeral counts the rest and the rail says when it began, so
-            // the one fact still missing is how the day itself is going.
-            let total = workdayTotalPill(snapshot)
-            guard !phone, case .onBreak(let startedAt, _) = snapshot.workday else { return [total] }
-            let time = TimeFormatting.timeOfDay(startedAt, locale: locale, timeZone: snapshot.calendar.timeZone)
-            let since = ContextPillPresentation(
-                id: "breakSince",
-                icon: .clock,
-                full: Copy.sinceFull(time, locale),
-                compact: Copy.sinceCompact(time, locale),
-                accessibilityLabel: Copy.breakSinceSpoken(time, locale),
-                tone: .stone
-            )
-            return [since, total]
         }
     }
 
@@ -491,29 +499,39 @@ public enum OrbitPresentationResolver {
         let locale = snapshot.locale
         switch state {
         case .working:
+            // Stone: stopping work is rest, and the palette says so everywhere
+            // else. Ember here made Break look like the thing to press on a
+            // screen whose actual invitation is Pomodoro.
             return LabeledAction(
                 action: .startBreak,
                 title: Copy.startBreak(locale),
                 icon: .cup,
-                tone: .ember,
+                tone: .stone,
                 accessibilityLabel: Copy.startBreak(locale)
             )
-        case .focusRunning, .focusPaused, .focusStaged:
+        case .focusRunning, .focusStaged:
+            // Stone, not ember. Ember is the work being recorded; restarting is
+            // taking the phase back, which is the same kind of act as leaving it
+            // — and drawn ember it was the loudest control in the footer while
+            // the timer beside it was the thing to look at.
             return LabeledAction(
                 action: .restartPhase,
                 title: Copy.restartShort(locale),
                 icon: .restart,
-                tone: .ember,
+                tone: .stone,
                 accessibilityLabel: Copy.restart(.focus, locale)
             )
-        case .pomodoroBreakRunning, .pomodoroBreakPaused, .pomodoroBreakStaged, .breakComplete:
-            return LabeledAction(
-                action: .backToWork,
-                title: Copy.backToWork(locale),
-                icon: .backToWork,
-                tone: .stone,
-                accessibilityLabel: Copy.backToWork(locale)
-            )
+        case .overrun, .focusPaused,
+             .pomodoroBreakRunning, .pomodoroBreakPaused, .pomodoroBreakStaged, .breakComplete:
+            // Nothing. The transport is the way through a break — its centre
+            // button is the ember one, and the forward arrow lands on the focus.
+            // A separate Back to work beside them was a third way to do what
+            // those two already do, and Restart is not something to reach for
+            // mid-rest.
+            //
+            // Leaving a *running* break early is therefore the forward arrow, or
+            // End Pomodoro to stop being scheduled altogether.
+            return nil
         case .clockedOut, .manualBreak:
             return nil
         }
@@ -546,18 +564,24 @@ public enum OrbitPresentationResolver {
                 title: Copy.startFocus(locale),
                 icon: .focus,
                 tone: .ember,
-                accessibilityLabel: Copy.startFocus(locale)
+                accessibilityLabel: Copy.startFocusSpoken(locale)
             ))
 
         case .manualBreak:
+            // Ember for the same reason as the break phase's version of it:
+            // this is the control that puts work back on the clock.
             return .primary(LabeledAction(
                 action: .backToWork,
                 title: Copy.backToWork(locale),
                 icon: .backToWork,
-                tone: .stone,
+                tone: .ember,
                 accessibilityLabel: Copy.backToWork(locale)
             ))
 
+        // Pause is the pause glyph on the face, in every phase. The disc is the
+        // *menu bar's* answer, where the mark is 8pt of colour with no room for
+        // a glyph to read as anything; here there is room, and a button that
+        // pauses should look like one.
         case .focusRunning:
             return transport(centre: LabeledAction(
                 action: .pause, icon: .pause, tone: .ember,
@@ -573,26 +597,43 @@ public enum OrbitPresentationResolver {
                 action: .startPhase, icon: .play, tone: .ember,
                 accessibilityLabel: Copy.startPhase(.focus, locale)), snapshot)
 
+        // The centre of the transport is ember in every phase, breaks included.
+        // It is the one button always in the same place doing the obvious thing,
+        // and tinting it by phase made it look like two different controls that
+        // happened to share a spot. The *state* is carried by the label, the
+        // dots and the scene, which do still cool off for a break.
         case .pomodoroBreakRunning(let kind):
             return transport(centre: LabeledAction(
-                action: .pause, icon: .pause, tone: .stone,
+                action: .pause, icon: .pause, tone: .ember,
                 accessibilityLabel: Copy.pauseBreak(kind, locale)), snapshot)
 
         case .pomodoroBreakPaused(let kind):
             return transport(centre: LabeledAction(
-                action: .resume, icon: .play, tone: .stone,
+                action: .resume, icon: .play, tone: .ember,
                 accessibilityLabel: Copy.resumeBreak(kind, locale)), snapshot)
 
         case .pomodoroBreakStaged(let kind):
             return transport(centre: LabeledAction(
-                action: .startPhase, icon: .play, tone: .stone,
+                action: .startPhase, icon: .play, tone: .ember,
                 accessibilityLabel: Copy.startPhase(kind, locale)), snapshot)
+
+        case .overrun(let kind):
+            // One button, and it is the only way out of a finished phase. The
+            // arrows are deliberately not offered here: this is the moment the
+            // user is being asked a question, and the answer is Continue.
+            return .primary(LabeledAction(
+                action: .continuePhase,
+                title: Copy.continuePhase(locale),
+                icon: .continueOn,
+                tone: .ember,
+                accessibilityLabel: Copy.continuePhaseSpoken(kind, locale)
+            ))
 
         case .breakComplete:
             // The engine has already staged the next focus; starting it is what
             // ends the linked rest.
             return transport(centre: LabeledAction(
-                action: .startPhase, icon: .play, tone: .stone,
+                action: .startPhase, icon: .play, tone: .ember,
                 accessibilityLabel: Copy.startPhase(.focus, locale)), snapshot)
         }
     }
@@ -624,8 +665,13 @@ public enum OrbitPresentationResolver {
         switch state {
         case .clockedOut: return .inactive
         case .working, .focusRunning, .focusStaged: return .recording
-        case .focusPaused: return .paused
-        case .pomodoroBreakRunning, .pomodoroBreakPaused, .pomodoroBreakStaged,
+        // A focus that has run over is still work; a break that has is still rest.
+        case .overrun(let kind): return kind == .focus ? .recording : .resting
+        // A paused focus opens a real rest, so the trace stops rather than
+        // merely cooling. `.paused` is left for nothing now, and stays only
+        // because a future phase that freezes without resting would want it.
+        case .focusPaused,
+             .pomodoroBreakRunning, .pomodoroBreakPaused, .pomodoroBreakStaged,
              .breakComplete, .manualBreak:
             return .resting
         }
@@ -668,7 +714,7 @@ public enum OrbitPresentationResolver {
         // shares one mark and never ticks.
         case .focusPaused:
             return MenuBarBadgePresentation(
-                mark: .pause,
+                mark: .solidStone,
                 value: TimeFormatting.clock(remaining),
                 cadence: .none,
                 accessibilityLabel: Copy.badgeFocusPaused(spokenRemaining, locale)
@@ -690,9 +736,15 @@ public enum OrbitPresentationResolver {
                 accessibilityLabel: Copy.badgeBreakRemaining(spokenRemaining, locale)
             )
 
+        // A break is a disc in the menu bar too, whether it is advancing or not.
+        // The pause bars are reserved for *work* being frozen — that is the one
+        // state where "the thing you were doing has stopped" is the right
+        // sentence, and it is the same rule the panel's centre button follows.
+        // What says a break is not advancing is the number beside it, which
+        // stops moving (see `cadence`).
         case .pomodoroBreakPaused(let kind):
             return MenuBarBadgePresentation(
-                mark: .pause,
+                mark: .solidStone,
                 value: TimeFormatting.clock(remaining),
                 cadence: .none,
                 accessibilityLabel: Copy.badgeBreakPaused(kind, spokenRemaining, locale)
@@ -700,7 +752,7 @@ public enum OrbitPresentationResolver {
 
         case .pomodoroBreakStaged(let kind):
             return MenuBarBadgePresentation(
-                mark: .pause,
+                mark: .solidStone,
                 value: TimeFormatting.clock(remaining),
                 cadence: .none,
                 accessibilityLabel: Copy.badgeBreakReady(kind, spokenRemaining, locale)
@@ -708,6 +760,16 @@ public enum OrbitPresentationResolver {
 
         // The countdown is over; what is still running is the open-ended work
         // break, so the badge switches to the open-ended grammar.
+        case .overrun(let kind):
+            let over = snapshot.pomodoro.overrun
+            return MenuBarBadgePresentation(
+                mark: kind == .focus ? .solidEmber : .solidStone,
+                value: "+" + TimeFormatting.clock(over),
+                cadence: .second,
+                accessibilityLabel: Copy.badgeOverrun(
+                    TimeFormatting.spoken(over, locale: locale), locale)
+            )
+
         case .breakComplete, .manualBreak:
             let elapsed = breakElapsed(snapshot)
             return MenuBarBadgePresentation(
@@ -745,26 +807,57 @@ public enum OrbitPresentationResolver {
         return kind == .focus ? Copy.focus(snapshot.locale) : Copy.breakPhase(kind, snapshot.locale)
     }
 
+    // MARK: Leaving the timer
+
+    /// True while there is a Pomodoro to leave: every state except a closed
+    /// day, plain working, and a manual break — none of which has a phase.
+    private static func hasPomodoroToLeave(_ state: State) -> Bool {
+        switch state {
+        case .clockedOut, .working, .manualBreak: return false
+        default: return true
+        }
+    }
+
+    /// Leaving the timer, as a control rather than a menu item.
+    ///
+    /// Finishing with the timer is not the same as finishing the day, and it is
+    /// too ordinary an intent to keep behind an ellipsis on a surface with a
+    /// footer to put it in. The phone has no footer, so there it stays in the
+    /// overflow and this is nil — one rule, resolved once, so the two surfaces
+    /// can never disagree about whether the action is available.
+    private static func endPomodoroAction(
+        _ state: State,
+        _ snapshot: OrbitSnapshot
+    ) -> LabeledAction? {
+        guard snapshot.surface == .panel, hasPomodoroToLeave(state) else { return nil }
+        return LabeledAction(
+            action: .endPomodoro,
+            title: Copy.endPomodoro(snapshot.locale),
+            icon: .endPomodoro,
+            tone: .stone,
+            accessibilityLabel: Copy.endPomodoro(snapshot.locale)
+        )
+    }
+
     // MARK: Overflow
 
-    private static func overflow(_ state: State, _ locale: Locale) -> [OverflowItem] {
+    private static func overflow(_ state: State, _ snapshot: OrbitSnapshot) -> [OverflowItem] {
+        let locale = snapshot.locale
         let history = OverflowItem(action: .history, title: Copy.history(locale), icon: .history)
         let settings = OverflowItem(action: .settings, title: Copy.settings(locale), icon: .settings)
         guard state != .clockedOut else { return [history, settings] }
 
+        // Restart belongs to the work, and only while the work is in play: it
+        // is on the rail during a focus and offered nowhere at all during a
+        // break. Restarting a rest is not a thing anyone reaches for, and it
+        // was the only entry standing between the user and the menu's real
+        // contents.
         var items: [OverflowItem] = []
-        switch state {
-        case .pomodoroBreakRunning, .pomodoroBreakPaused, .pomodoroBreakStaged, .breakComplete:
-            // Restart is on the rail only while a focus phase is in play; during
-            // a break the rail is carrying Back to work instead.
-            items.append(OverflowItem(action: .restartPhase,
-                                      title: Copy.restartPhase(locale), icon: .restart))
-        default:
-            break
-        }
         // Finishing with the timer is not the same as finishing the day, so
-        // there is a way out of Pomodoro that leaves the workday running.
-        if state != .working && state != .manualBreak {
+        // there is a way out of Pomodoro that leaves the workday running. The
+        // panel puts it in the footer instead, and a menu that repeated it
+        // would be offering the same thing twice on one screen.
+        if hasPomodoroToLeave(state), endPomodoroAction(state, snapshot) == nil {
             items.append(OverflowItem(action: .endPomodoro,
                                       title: Copy.endPomodoro(locale), icon: .endPomodoro))
         }

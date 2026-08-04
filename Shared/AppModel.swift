@@ -254,6 +254,14 @@ final class AppModel {
                 at: engine.cyclePosition + 1,
                 sessionsUntilLongBreak: settings.sessionsUntilLongBreak
             ),
+            // Clamped the way the engine clamps it, so the back arrow names the
+            // phase it will actually land on rather than one off the start of
+            // the cycle. Left unset, it defaulted to Focus and the arrow said
+            // "Focus" in every state, including the ones it moves to a break.
+            previousPhaseKind: PomodoroEngine.kind(
+                at: max(0, engine.cyclePosition - 1),
+                sessionsUntilLongBreak: settings.sessionsUntilLongBreak
+            ),
             nextFocusDuration: settings.focusDuration,
             yesterdayWorked: nonZero(netWorkedYesterday(now: now)),
             surface: surface,

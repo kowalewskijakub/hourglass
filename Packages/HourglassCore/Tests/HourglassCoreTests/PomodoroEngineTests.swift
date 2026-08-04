@@ -39,21 +39,98 @@ import Foundation
         #expect(abs(engine.progress - 0.3) < 0.0001)
     }
 
-    @Test func completingFocusRecordsSessionAndAdvancesToShortBreak() {
+    /// A phase that runs out records itself and *stays put*, counting on past
+    /// its end. Nothing advances but the user — see ``advance()``.
+    @Test func aFinishedFocusRecordsItselfAndKeepsCounting() {
         let (engine, history, clock) = makeEngine()
         engine.start()
         clock.advance(by: 100)
+
+        #expect(engine.kind == .focus, "still on the focus that finished")
+        #expect(engine.cyclePosition == 0)
+        #expect(engine.phase == .running)
+        #expect(engine.isOverrunning)
+        #expect(engine.remaining == 0)
+        #expect(clock.isScheduled, "the count goes on")
+
+        // The record is written at the finish, not at the continue: the focus
+        // was 100 seconds long whatever the user does next.
+        let sessions = history.all()
+        #expect(sessions.count == 1)
+        #expect(sessions.first?.kind == .focus)
+        #expect(sessions.first?.completed == true)
+
+        clock.advance(by: 14)
+        #expect(engine.overrun == 14)
+        #expect(history.all().count == 1, "the finish is announced once, not once a tick")
+    }
+
+    /// Continue moves the position, so it must be announced — the sync layer
+    /// mirrors the engine from these callbacks, and an unannounced Continue left
+    /// the peer sitting on the finished phase, ready to push it straight back.
+    @Test func continuingAnnouncesItselfSoItCanBeMirrored() {
+        let (engine, _, clock) = makeEngine()
+        var interruptions = 0
+        engine.onSessionInterrupted = { _ in interruptions += 1 }
+        engine.start()
+        clock.advance(by: 100)
+        #expect(interruptions == 0, "running out is not an interruption")
+
+        engine.advance()
+        #expect(interruptions == 1)
+    }
+
+    /// The deadline stays readable through an overrun, because it is the only
+    /// truthful thing to put on the wire: `remaining` is pinned at zero, so a
+    /// deadline derived from it would re-date the finish to the push instant and
+    /// the two devices would drift apart on how far over they are.
+    @Test func theDeadlineSurvivesTheFinishSoItCanBeMirrored() {
+        let (engine, _, clock) = makeEngine()
+        engine.start()
+        let deadline = clock.now.addingTimeInterval(100)
+        clock.advance(by: 160)
+
+        #expect(engine.isOverrunning)
+        #expect(engine.remaining == 0)
+        #expect(engine.plannedEnd == deadline)
+
+        engine.advance()
+        #expect(engine.plannedEnd == nil)
+    }
+
+    /// A peer's overrun is adopted as one, and must leave nothing behind that a
+    /// later teardown could log as a session that never happened.
+    @Test func anAdoptedOverrunCannotLogAPhantomFocus() {
+        let (engine, history, clock) = makeEngine()
+        engine.applyRemoteState(
+            cyclePosition: 0,
+            isRunning: true,
+            endDate: clock.now.addingTimeInterval(-30),
+            pausedAt: nil
+        )
+        #expect(engine.isOverrunning)
+        #expect(history.all().isEmpty, "the record belongs to the device that saw the finish")
+
+        engine.endCycle() // or a clock-out, or a scrub — any teardown
+
+        #expect(history.all().isEmpty, "no phantom full-length focus")
+    }
+
+    @Test func continuingIsWhatMovesToTheNextPhase() {
+        let (engine, history, clock) = makeEngine()
+        engine.start()
+        clock.advance(by: 130) // 30s past the end
+
+        engine.advance()
 
         #expect(engine.kind == .shortBreak)
         #expect(engine.phase == .idle)
         #expect(engine.cyclePosition == 1)
         #expect(engine.remaining == 20)
+        #expect(engine.overrun == 0)
+        #expect(engine.isOverrunning == false)
         #expect(clock.isScheduled == false)
-
-        let sessions = history.all()
-        #expect(sessions.count == 1)
-        #expect(sessions.first?.kind == .focus)
-        #expect(sessions.first?.completed == true)
+        #expect(history.all().count == 1, "continuing records nothing of its own")
     }
 
     @Test func completionCallbackFiresWithFinishedSession() {
@@ -71,11 +148,13 @@ import Foundation
         for i in 1...4 {
             #expect(engine.kind == .focus)
             engine.start()
-            clock.advance(by: 100) // complete focus
+            clock.advance(by: 100) // focus runs out
+            engine.advance()       // ...and the user continues
             if i < 4 {
                 #expect(engine.kind == .shortBreak)
                 engine.start()
-                clock.advance(by: 20) // complete short break -> back to focus
+                clock.advance(by: 20)
+                engine.advance()
                 #expect(engine.kind == .focus)
             } else {
                 #expect(engine.kind == .longBreak)
@@ -172,10 +251,11 @@ import Foundation
         engine.start()
         clock.jump(by: 500) // far past the 100s focus
         clock.fireTick()
-        // Completion is detected and the engine advances to the next session,
-        // which is presented ready at its full duration (short break = 20s).
-        #expect(engine.kind == .shortBreak)
-        #expect(engine.remaining == 20)
+        // The finish is detected and recorded; the phase is where the user left
+        // it, 400 seconds over, waiting to be continued.
+        #expect(engine.kind == .focus)
+        #expect(engine.isOverrunning)
+        #expect(engine.overrun == 400)
         #expect(history.all().count == 1)
         #expect(history.all().first?.completed == true)
     }
@@ -185,7 +265,8 @@ import Foundation
         engine.start()
         clock.jump(by: 500)
         engine.refresh() // e.g. scenePhase becomes .active
-        #expect(engine.kind == .shortBreak)
+        #expect(engine.kind == .focus)
+        #expect(engine.isOverrunning)
         #expect(history.all().first?.completed == true)
     }
 
@@ -210,12 +291,20 @@ import Foundation
         #expect(engine.remaining == 20)
     }
 
-    @Test func autoStartBreaksBeginsBreakImmediately() {
+    /// Auto-start is now about what happens *after* Continue, not instead of it:
+    /// the focus still waits to be continued, and the break it moves to begins
+    /// by itself.
+    @Test func autoStartBreaksBeginsTheBreakOnceTheUserContinues() {
         var settings = TimerSettings(focusDuration: 100, shortBreakDuration: 20, longBreakDuration: 40, sessionsUntilLongBreak: 4)
         settings.autoStartBreaks = true
         let (engine, _, clock) = makeEngine(settings: settings)
         engine.start()
-        clock.advance(by: 100) // focus completes
+        clock.advance(by: 100) // focus runs out
+
+        #expect(engine.kind == .focus, "a finished focus waits, whatever auto-start says")
+        #expect(engine.isOverrunning)
+
+        engine.advance()
         #expect(engine.kind == .shortBreak)
         #expect(engine.phase == .running) // auto-started
         #expect(clock.isScheduled)
@@ -293,7 +382,10 @@ import Foundation
     /// A mirror that arrives after its own deadline is stale, not a countdown —
     /// and the session it describes completed out there, so the engine lands
     /// idle at the NEXT phase, not back at the one that already finished.
-    @Test func remoteStateWithAnElapsedEndDateLandsIdleAtTheNextPhase() {
+    /// A peer's row whose deadline has passed describes a phase in **overrun**
+    /// over there, not one that finished and moved on. Adopting an advance the
+    /// user never made would skip a phase out from under them.
+    @Test func remoteStateWithAnElapsedEndDateIsAdoptedAsAnOverrun() {
         let (engine, _, clock) = makeEngine()
         engine.applyRemoteState(
             cyclePosition: 0,
@@ -301,10 +393,12 @@ import Foundation
             endDate: clock.now.addingTimeInterval(-5),
             pausedAt: nil
         )
-        #expect(engine.phase == .idle)
-        #expect(engine.cyclePosition == 1)
-        #expect(engine.remaining == 20) // the short break that follows focus 0
-        #expect(clock.isScheduled == false)
+        #expect(engine.phase == .running)
+        #expect(engine.cyclePosition == 0)
+        #expect(engine.kind == .focus)
+        #expect(engine.isOverrunning)
+        #expect(engine.overrun == 5)
+        #expect(engine.remaining == 0)
     }
 
     /// The whole point of the wire format: pause here, adopt there, resume there,
@@ -409,7 +503,7 @@ import Foundation
         engine.onSessionCompleted = { _ in completions += 1 }
         clock.advance(by: 41)
 
-        #expect(engine.phase == .idle)
+        #expect(engine.isOverrunning, "the mirror finishes into the same overrun")
         // The mirror records too — under the id the live state carried, so the
         // origin device's copy upserts into the same row rather than a second
         // one. This is what lets a Pomodoro survive the origin being offline

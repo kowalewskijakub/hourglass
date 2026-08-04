@@ -109,6 +109,11 @@ public struct WorkdayLog: Sendable {
     /// Everything flattened, newest first.
     public let timeline: [LogItem]
 
+    /// The break *phase* each rest interval absorbed, where the two were paired
+    /// into one row. Acting on that row has to act on both records — see
+    /// ``targets(for:)``.
+    private let phaseOfBreak: [WorkBreak.ID: FocusSession.ID]
+
     /// A break phase and the work break it opened are one rest interval, so the
     /// log shows one row. The two records are matched by overlap rather than by
     /// a stored link: that also covers days recorded before Pomodoro breaks were
@@ -141,14 +146,17 @@ public struct WorkdayLog: Sendable {
         // Which phase, if any, each rest interval belongs to. One pass over
         // every break so both the nested view and the flat export agree.
         var sourceOfBreak: [WorkBreak.ID: SessionKind] = [:]
+        var phaseOfBreak: [WorkBreak.ID: FocusSession.ID] = [:]
         var absorbedSessions: Set<FocusSession.ID> = []
         for clockSession in clockSessions {
             for entry in clockSession.breaks {
                 guard let phase = recorded.first(where: { Self.covers(entry, $0, now: now) }) else { continue }
                 sourceOfBreak[entry.id] = phase.kind
+                phaseOfBreak[entry.id] = phase.id
                 absorbedSessions.insert(phase.id)
             }
         }
+        self.phaseOfBreak = phaseOfBreak
         let standalone = recorded.filter { !absorbedSessions.contains($0.id) }
 
         // Where each workday stops claiming. An open workday claims up to the
@@ -200,11 +208,24 @@ public struct WorkdayLog: Sendable {
         self.timeline = timeline.sorted { $0.startedAt > $1.startedAt }
     }
 
-    /// The whole log as CSV, oldest first, for export.
-    public func exportCSV() -> String {
+    /// The break phase drawn as part of this rest's row, if one was paired into
+    /// it. Nil for a manual rest, and for a Pomodoro rest recorded before the
+    /// phase and the interval were linked.
+    func phase(pairedInto entry: WorkBreak.ID) -> FocusSession.ID? {
+        phaseOfBreak[entry]
+    }
+
+    /// The log as CSV, oldest first, for export — everything by default, or
+    /// exactly the rows whose ids are given.
+    ///
+    /// A subset is taken literally: selecting a workday exports the workday row
+    /// and not the breaks under it, because the user picked rows off a list and
+    /// the file should hold the rows they picked.
+    public func exportCSV(ids: Set<UUID>? = nil) -> String {
         var lines = ["type,start,end,duration_minutes"]
         let formatter = ISO8601DateFormatter()
-        for item in timeline.sorted(by: { $0.startedAt < $1.startedAt }) {
+        let rows = ids.map { selected in timeline.filter { selected.contains($0.id) } } ?? timeline
+        for item in rows.sorted(by: { $0.startedAt < $1.startedAt }) {
             let minutes = String(format: "%.1f", item.duration / 60)
             let start = formatter.string(from: item.startedAt)
             let end = formatter.string(from: item.startedAt.addingTimeInterval(item.duration))

@@ -28,6 +28,13 @@ public final class PomodoroEngine {
     public private(set) var phase: Phase = .idle
     /// Seconds remaining in the current session.
     public private(set) var remaining: TimeInterval
+    /// Seconds this phase has run **past** its planned end, once it has.
+    ///
+    /// A phase no longer advances itself when the clock runs out: it announces
+    /// the finish (the notification, the History record) and keeps counting, so
+    /// the user is never told a focus is over while they are still in the middle
+    /// of something. ``advance()`` is what moves on, and only the user calls it.
+    public private(set) var overrun: TimeInterval = 0
     /// When the current session was frozen, so the UI can say *when* the pause
     /// began rather than only that it did. Nil unless `phase == .paused`.
     public private(set) var pausedAt: Date?
@@ -57,6 +64,13 @@ public final class PomodoroEngine {
     // MARK: Internal timekeeping
 
     private var endDate: Date?
+    /// The deadline this phase was given, kept after the finish has been
+    /// announced so the overrun can go on being measured against it — and so the
+    /// sync layer has something truthful to put on the wire. `endDate` is
+    /// cleared by the recording; this is not.
+    public private(set) var plannedEnd: Date?
+    /// One announcement per phase, however many ticks arrive after zero.
+    private var didAnnounceFinish = false
     private var currentSessionStart: Date?
 
     /// The identity of the session currently on the clock, minted at `start()`
@@ -112,6 +126,9 @@ public final class PomodoroEngine {
 
     public var isRunning: Bool { phase == .running }
 
+    /// True once the phase has passed its planned end and is counting on.
+    public var isOverrunning: Bool { phase == .running && didAnnounceFinish }
+
     /// mm:ss string for the remaining time.
     public var formattedRemaining: String { TimeFormatting.clock(remaining) }
 
@@ -156,6 +173,9 @@ public final class PomodoroEngine {
         currentSessionID = UUID() // a fresh identity, shared via the live state
         isMirroring = false // started here
         pausedAt = nil
+        plannedEnd = endDate
+        overrun = 0
+        didAnnounceFinish = false
         phase = .running
         scheduleTicks()
         onSessionStarted?(kind, remaining)
@@ -173,6 +193,7 @@ public final class PomodoroEngine {
     public func resume() {
         guard phase == .paused else { return }
         endDate = clock.now.addingTimeInterval(remaining)
+        plannedEnd = endDate
         pausedAt = nil
         phase = .running
         scheduleTicks()
@@ -201,6 +222,37 @@ public final class PomodoroEngine {
         pausedAt = nil
         remaining = plannedDuration
         if abandoned { onSessionInterrupted?(true) }
+    }
+
+    /// Move on from a phase that has run out — the user's "Continue".
+    ///
+    /// This is the only thing that ends a finished phase. The record was already
+    /// written when the clock reached zero, so all that is left is to take the
+    /// position forward and set the next phase up; whether it starts by itself
+    /// is still the auto-start settings' business.
+    public func advance() {
+        guard phase != .idle else { return }
+        clock.cancel()
+        endDate = nil
+        plannedEnd = nil
+        overrun = 0
+        didAnnounceFinish = false
+        currentSessionStart = nil
+        currentSessionID = nil
+        pausedAt = nil
+        isMirroring = false
+        cyclePosition += 1
+        phase = .idle
+        remaining = plannedDuration
+
+        // Announced, because this moved the position. Every other intent that
+        // does reports it, and the sync layer mirrors the engine from these
+        // callbacks — without one, Continue was invisible to the other device,
+        // which sat on the finished phase and pushed it straight back.
+        onSessionInterrupted?(true)
+
+        let autoStart = kind.isBreak ? settings.autoStartBreaks : settings.autoStartFocus
+        if autoStart { start() }
     }
 
     /// Scrub forward to the next phase in the cycle.
@@ -257,29 +309,34 @@ public final class PomodoroEngine {
 
         if isRunning, let endDate {
             let remaining = max(0, endDate.timeIntervalSince(clock.now))
-            guard remaining > 0 else {
-                // The row describes a session whose deadline has already
-                // passed: it completed out there, whether or not its device
-                // was awake to say so. Land where the completion leads — idle
-                // at the NEXT phase — not at the position the stale row still
-                // names. (The record itself arrives from whichever device
-                // witnessed the finish; landing pre-advance regressed us.)
-                self.cyclePosition = max(0, cyclePosition) + 1
-                self.endDate = nil
-                phase = .idle
-                self.remaining = plannedDuration
-                currentSessionID = nil
-                self.pausedAt = nil
-                isMirroring = false
-                return wasActive ? .stopped : .unchanged
-            }
-            self.endDate = endDate
+            self.endDate = remaining > 0 ? endDate : nil
+            self.plannedEnd = endDate
             self.remaining = remaining
             self.pausedAt = nil
-            if currentSessionStart == nil { currentSessionStart = clock.now }
             if let sessionID { currentSessionID = sessionID }
             isMirroring = !ownsCurrentSession
             phase = .running
+
+            // A row whose deadline has already passed is a phase in **overrun**
+            // over there, not one that finished and moved on. Landing at the
+            // next position was right while the engine advanced itself; now
+            // nothing advances but the user, so adopting the advance here would
+            // skip a phase they never continued past. The record arrives on its
+            // own row from whichever device witnessed the finish.
+            if remaining <= 0 {
+                didAnnounceFinish = true
+                overrun = max(0, clock.now.timeIntervalSince(endDate))
+                // The phase behind this row has already finished, and whichever
+                // device witnessed it wrote the record. Leaving an anchor here
+                // would let a later teardown on *this* device log a second,
+                // phantom session of the full planned length — the abandon path
+                // measures `plannedDuration - remaining`, and remaining is nil.
+                currentSessionStart = nil
+            } else {
+                didAnnounceFinish = false
+                overrun = 0
+                if currentSessionStart == nil { currentSessionStart = clock.now }
+            }
             scheduleTicks()
             let deadlineMoved = previousEndDate.map { abs($0.timeIntervalSince(endDate)) > 1 } ?? true
             return (previousPhase != .running || deadlineMoved)
@@ -301,10 +358,16 @@ public final class PomodoroEngine {
             // The peer's freeze instant, so "paused since" reads the same on
             // both devices rather than restarting at this device's clock.
             self.pausedAt = pausedAt
+            self.plannedEnd = nil
+            overrun = 0
+            didAnnounceFinish = false
             phase = .paused
             return previousPhase == .paused ? .unchanged : .paused
         } else {
             self.endDate = nil
+            self.plannedEnd = nil
+            overrun = 0
+            didAnnounceFinish = false
             currentSessionStart = nil
             currentSessionID = nil
             self.pausedAt = nil
@@ -319,7 +382,7 @@ public final class PomodoroEngine {
     public func refresh() {
         guard phase == .running else { return }
         recomputeRemaining()
-        if remaining <= 0 { complete() }
+        if remaining <= 0 { passZero() }
     }
 
     // MARK: Machinery
@@ -355,6 +418,9 @@ public final class PomodoroEngine {
         // whether `remaining` still needs catching up to the wall clock.
         if wasActive { recordAbandonedFocusIfSubstantial() }
         endDate = nil
+        plannedEnd = nil
+        overrun = 0
+        didAnnounceFinish = false
         currentSessionStart = nil
         currentSessionID = nil
         pausedAt = nil
@@ -395,7 +461,15 @@ public final class PomodoroEngine {
     private func tick() {
         guard phase == .running else { return }
         recomputeRemaining()
-        if remaining <= 0 { complete() }
+        if remaining <= 0 { passZero() }
+    }
+
+    /// At and beyond the deadline: announce the finish exactly once, then keep
+    /// counting upward until the user continues.
+    private func passZero() {
+        if !didAnnounceFinish { announceFinish() }
+        guard let plannedEnd else { return }
+        overrun = max(0, clock.now.timeIntervalSince(plannedEnd))
     }
 
     private func recomputeRemaining() {
@@ -403,23 +477,20 @@ public final class PomodoroEngine {
         remaining = max(0, endDate.timeIntervalSince(clock.now))
     }
 
-    private func complete() {
-        clock.cancel()
+    /// The clock ran out: write the record and tell the host, but stay on this
+    /// phase. Nothing advances until ``advance()``.
+    ///
+    /// The position deliberately does *not* move here any more. It used to, and
+    /// the ordering mattered a great deal — listeners mirror the engine to other
+    /// devices, so announcing before advancing published the dying phase as the
+    /// live one. Now nothing moves at all, and the peers that adopt this state
+    /// land in the same overrun this device is in.
+    private func announceFinish() {
+        didAnnounceFinish = true
         remaining = 0
+        // Keeps ticking: the countdown is over but the count is not.
         let finished = finishCurrentSession(completed: true)
-
-        // Advance to the next phase BEFORE announcing the completion. Listeners
-        // snapshot the engine and mirror it to other devices; announcing first
-        // published "running, ends right now, old position" as the final state,
-        // and every peer that applied it regressed to the phase just finished.
-        cyclePosition += 1
-        phase = .idle
-        remaining = plannedDuration
-
         if let finished { onSessionCompleted?(finished) }
-
-        let autoStart = kind.isBreak ? settings.autoStartBreaks : settings.autoStartFocus
-        if autoStart { start() }
     }
 
     @discardableResult
@@ -444,8 +515,11 @@ public final class PomodoroEngine {
         // row. This is what lets a Pomodoro survive the starting device being
         // offline at the moment it completes.
         history.upsert(session)
+        // The anchor goes, so nothing can log this stretch twice. The *id*
+        // stays: the phase is still on screen and still being mirrored, and the
+        // peers need it to recognise the record as the one they already have.
+        // `advance()` and `stopTimekeeping()` clear it when the phase really ends.
         currentSessionStart = nil
-        currentSessionID = nil
         endDate = nil
         return session
     }

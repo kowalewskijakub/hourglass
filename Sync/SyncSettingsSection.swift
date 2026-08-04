@@ -12,8 +12,11 @@ struct SyncSettingsSection: View {
     @State private var confirmingDisconnect = false
     @State private var confirmingStartOver = false
 
+    /// A stack rather than a `Section`: Settings is built from cards now (see
+    /// `OrbitCard`), and this is the content of the Sync one. The card supplies
+    /// the title the section header used to.
     var body: some View {
-        Section {
+        VStack(alignment: .leading, spacing: 10) {
             switch sync.state {
             case .off where !sync.hasSyncedBefore, .failed where !sync.hasSyncedBefore:
                 firstRun
@@ -30,18 +33,18 @@ struct SyncSettingsSection: View {
 
             if case .failed(let message) = sync.state {
                 Text(message)
-                    .font(.caption)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.red)
             }
 
             if let writeError = sync.lastSyncError {
                 Label("Couldn't reach the server — \(writeError)", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.orange)
             }
-        } header: {
-            Text("Sync")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .controlSize(.small)
         .confirmationDialog(
             "Disconnect this device?",
             isPresented: $confirmingDisconnect,
@@ -175,18 +178,27 @@ struct SyncSettingsSection: View {
         // Re-renders every second so the countdown and the expiry are truthful.
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             if pairing.isExpired {
-                Label("Code expired", systemImage: "clock.badge.xmark")
-                    .foregroundStyle(.orange)
-                Button("Get a new code") {
-                    Task { await sync.createPairingCode() }
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Code expired", systemImage: "clock.badge.xmark")
+                        .foregroundStyle(.orange)
+                    Button("Get a new code") {
+                        Task { await sync.createPairingCode() }
+                    }
+                    .disabled(sync.isBusy)
                 }
-                .disabled(sync.isBusy)
             } else {
-                LabeledContent("Pairing code", value: SyncService.formatted(pairing.code))
-                    .font(.system(.body, design: .monospaced))
-                Text("Enter this on your other device — expires in \(timeLeft(pairing)). It works once.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    // The code is the thing to read off and type in, so it is
+                    // set as the largest thing in the card rather than as the
+                    // value half of a labelled row.
+                    Text(SyncService.formatted(pairing.code))
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .textSelection(.enabled)
+                    Text("Enter this on your other device — expires in \(timeLeft(pairing)). It works once.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

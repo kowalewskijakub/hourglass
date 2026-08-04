@@ -30,16 +30,40 @@ enum Copy {
         t("orbit.state.focusPaused", "Focus paused", locale, "State label: focus phase frozen")
     }
 
+    /// One name for both lengths.
+    ///
+    /// Short versus long is a fact about the *schedule*, not about what the user
+    /// is doing: either way they are resting between focuses, and the countdown
+    /// on screen already says how much of it is left. The distinction still
+    /// matters where the two are configured — see the durations in Settings —
+    /// but not while one of them is running. `kind` stays in the signature
+    /// because the caller has it and the two may yet diverge again.
     static func breakPhase(_ kind: SessionKind, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.state.longBreak", "Long break", locale, "State label: long Pomodoro break")
-            : t("orbit.state.shortBreak", "Short break", locale, "State label: short Pomodoro break")
+        t("orbit.state.focusBreak", "Focus break", locale, "State label: a Pomodoro break")
     }
 
     static func breakPhasePaused(_ kind: SessionKind, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.state.longBreakPaused", "Long break paused", locale, "State label")
-            : t("orbit.state.shortBreakPaused", "Short break paused", locale, "State label")
+        t("orbit.state.focusBreakPaused", "Focus break paused", locale, "State label")
+    }
+
+    /// The button that ends a finished phase — the only thing that does.
+    static func continuePhase(_ locale: Locale) -> String {
+        t("orbit.action.continue", "Continue", locale, "Button: move on to the next phase")
+    }
+
+    static func continuePhaseSpoken(_ kind: SessionKind, _ locale: Locale) -> String {
+        kind == .focus
+            ? t("orbit.action.continueToBreak", "Continue to the break", locale, "Button")
+            : t("orbit.action.continueToFocus", "Continue to the focus", locale, "Button")
+    }
+
+    static func overrunSpoken(_ duration: String, _ locale: Locale) -> String {
+        t("orbit.numeral.overrun", "\(duration) past the end", locale, "VoiceOver: overrun")
+    }
+
+    static func badgeOverrun(_ duration: String, _ locale: Locale) -> String {
+        t("orbit.badge.overrun", "Hourglass, finished, \(duration) over. Continue when ready.",
+          locale, "Status item VoiceOver label")
     }
 
     static func breakComplete(_ locale: Locale) -> String {
@@ -197,8 +221,19 @@ enum Copy {
         t("orbit.action.clockOut", "Clock out", locale, "Destructive button")
     }
 
+    /// Named for the thing it starts, so it pairs with "End Pomodoro" sitting a
+    /// slot away from it. "Start focus" named the first *phase* instead, which
+    /// left the app calling the same object two different things depending on
+    /// which end of it you were at.
     static func startFocus(_ locale: Locale) -> String {
-        t("orbit.action.startFocus", "Start focus", locale, "Button")
+        t("orbit.action.startFocus", "Pomodoro", locale, "Button: begin a Pomodoro")
+    }
+
+    /// One word is enough to read on a button and not enough to hear. Spoken, it
+    /// says what pressing it does.
+    static func startFocusSpoken(_ locale: Locale) -> String {
+        t("orbit.action.startFocusSpoken", "Start a Pomodoro", locale,
+          "Accessible name for the Pomodoro button")
     }
 
     /// Each arrow names where it lands, so the pair is never a bare chevron.
@@ -206,10 +241,8 @@ enum Copy {
         switch kind {
         case .focus:
             return t("orbit.action.previousFocus", "Back to focus", locale, "Button")
-        case .shortBreak:
-            return t("orbit.action.previousShortBreak", "Back to short break", locale, "Button")
-        case .longBreak:
-            return t("orbit.action.previousLongBreak", "Back to long break", locale, "Button")
+        case .shortBreak, .longBreak:
+            return t("orbit.action.previousBreak", "Back to focus break", locale, "Button")
         }
     }
 
@@ -217,10 +250,8 @@ enum Copy {
         switch kind {
         case .focus:
             return t("orbit.action.nextFocus", "Forward to focus", locale, "Button")
-        case .shortBreak:
-            return t("orbit.action.nextShortBreak", "Forward to short break", locale, "Button")
-        case .longBreak:
-            return t("orbit.action.nextLongBreak", "Forward to long break", locale, "Button")
+        case .shortBreak, .longBreak:
+            return t("orbit.action.nextBreak", "Forward to focus break", locale, "Button")
         }
     }
 
@@ -228,10 +259,8 @@ enum Copy {
         switch kind {
         case .focus:
             return t("orbit.action.startThisFocus", "Start focus", locale, "Button")
-        case .shortBreak:
-            return t("orbit.action.startShortBreak", "Start short break", locale, "Button")
-        case .longBreak:
-            return t("orbit.action.startLongBreak", "Start long break", locale, "Button")
+        case .shortBreak, .longBreak:
+            return t("orbit.action.startBreakPhase", "Start focus break", locale, "Button")
         }
     }
 
@@ -262,25 +291,19 @@ enum Copy {
     }
 
     static func pauseBreak(_ kind: SessionKind, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.action.pauseLongBreak", "Pause long break", locale, "Button")
-            : t("orbit.action.pauseShortBreak", "Pause short break", locale, "Button")
+        t("orbit.action.pauseBreak", "Pause focus break", locale, "Button")
     }
 
     static func resumeBreak(_ kind: SessionKind, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.action.resumeLongBreak", "Resume long break", locale, "Button")
-            : t("orbit.action.resumeShortBreak", "Resume short break", locale, "Button")
+        t("orbit.action.resumeBreak", "Resume focus break", locale, "Button")
     }
 
     static func restart(_ kind: SessionKind, _ locale: Locale) -> String {
         switch kind {
         case .focus:
             return t("orbit.action.restartFocus", "Restart current focus", locale, "Button")
-        case .shortBreak:
-            return t("orbit.action.restartShortBreak", "Restart current short break", locale, "Button")
-        case .longBreak:
-            return t("orbit.action.restartLongBreak", "Restart current long break", locale, "Button")
+        case .shortBreak, .longBreak:
+            return t("orbit.action.restartBreak", "Restart current focus break", locale, "Button")
         }
     }
 
@@ -289,10 +312,8 @@ enum Copy {
         switch kind {
         case .focus:
             return t("orbit.action.skipToFocus", "Skip to focus", locale, "Button")
-        case .shortBreak:
-            return t("orbit.action.skipToShortBreak", "Skip to short break", locale, "Button")
-        case .longBreak:
-            return t("orbit.action.skipToLongBreak", "Skip to long break", locale, "Button")
+        case .shortBreak, .longBreak:
+            return t("orbit.action.skipToBreak", "Skip to focus break", locale, "Button")
         }
     }
 
@@ -344,19 +365,13 @@ enum Copy {
     }
 
     static func badgeBreakPaused(_ kind: SessionKind, _ duration: String, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.badge.longBreakPaused", "Hourglass, long break paused, \(duration) remaining.",
-                locale, "Status item VoiceOver label")
-            : t("orbit.badge.shortBreakPaused", "Hourglass, short break paused, \(duration) remaining.",
-                locale, "Status item VoiceOver label")
+        t("orbit.badge.breakPaused", "Hourglass, focus break paused, \(duration) remaining.",
+          locale, "Status item VoiceOver label")
     }
 
     static func badgeBreakReady(_ kind: SessionKind, _ duration: String, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.badge.longBreakReady", "Hourglass, long break ready to start, \(duration).",
-                locale, "Status item VoiceOver label")
-            : t("orbit.badge.shortBreakReady", "Hourglass, short break ready to start, \(duration).",
-                locale, "Status item VoiceOver label")
+        t("orbit.badge.breakReady", "Hourglass, focus break ready to start, \(duration).",
+          locale, "Status item VoiceOver label")
     }
 
     static func badgeBreakElapsed(_ duration: String, _ locale: Locale) -> String {
@@ -391,9 +406,7 @@ enum Copy {
     }
 
     static func sourcePomodoro(_ kind: SessionKind, _ locale: Locale) -> String {
-        kind == .longBreak
-            ? t("orbit.source.pomodoroLong", "Pomodoro long break", locale, "Break source")
-            : t("orbit.source.pomodoroShort", "Pomodoro short break", locale, "Break source")
+        t("orbit.source.pomodoro", "Pomodoro focus break", locale, "Break source")
     }
 
     static func sourceManual(_ locale: Locale) -> String {

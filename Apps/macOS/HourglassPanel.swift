@@ -40,19 +40,26 @@ struct HourglassPanel: View {
                     .padding(.top, 20)
 
                 VStack {
-                    HStack {
-                        Spacer(minLength: 0)
-                        OrbitControlsView(controls: presentation.controls, surface: .panel) {
-                            model.perform($0)
+                    if let hero = heroControls(presentation) {
+                        HStack {
+                            Spacer(minLength: 0)
+                            OrbitControlsView(controls: hero, surface: .panel) {
+                                model.perform($0)
+                            }
+                            .padding(.trailing, 18)
+                            .padding(.top, 22)
                         }
-                        .padding(.trailing, 18)
-                        .padding(.top, 22)
                     }
                     Spacer(minLength: 0)
                     footer(presentation, palette: palette)
                 }
             }
             .environment(\.orbitPalette, palette)
+            // The panel follows the *sky*, not the system. Anything AppKit draws
+            // for itself — the overflow menu's glyph above all — reads the
+            // colour scheme rather than our palette, so a Mac in dark mode drew
+            // a white ellipsis onto a pale daytime footer and it disappeared.
+            .environment(\.colorScheme, palette.isNight ? .dark : .light)
         }
         .frame(width: Self.size.width, height: Self.size.height)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -62,6 +69,18 @@ struct HourglassPanel: View {
         } message: {
             // Names exactly what stopping now will end.
             Text(clockOut.confirmationMessage)
+        }
+    }
+
+    /// The controls that belong over the scene rather than in the footer: the
+    /// transport always, and a labelled action only while it is the one thing on
+    /// an otherwise empty screen. Nil once the footer is carrying it.
+    private func heroControls(_ presentation: OrbitPresentation) -> OrbitControlsPresentation? {
+        switch presentation.controls {
+        case .transport:
+            return presentation.controls
+        case .primary:
+            return presentation.primaryPlacement == .hero ? presentation.controls : nil
         }
     }
 
@@ -77,7 +96,8 @@ struct HourglassPanel: View {
                     .foregroundStyle(palette.color(presentation.stateTone))
 
                 if let dots = presentation.cycleDots {
-                    CycleDots(completedInCycle: dots.completed, total: dots.total, tint: palette.ember)
+                    CycleDots(completedInCycle: dots.completed, total: dots.total,
+                              tint: palette.color(dots.tone))
                 }
             }
 
@@ -86,6 +106,13 @@ struct HourglassPanel: View {
                 .kerning(-1.4)
                 .foregroundStyle(palette.ink)
                 .contentTransition(.numericText())
+                // Now that every numeral is countdown-sized, a twelve-hour day
+                // ("12:34:56") is the widest thing that can land here — and the
+                // transport sits on the same line. Bounded and allowed to shrink
+                // rather than allowed to run under the arrows.
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .frame(maxWidth: 190, alignment: .leading)
                 .padding(.top, 8)
 
             if !presentation.contextPills.isEmpty {
@@ -102,11 +129,28 @@ struct HourglassPanel: View {
 
     private func footer(_ presentation: OrbitPresentation, palette: OrbitPalette) -> some View {
         HStack(spacing: 7) {
+            // Once the day is under way, the labelled action joins the rest of
+            // the controls down here rather than floating over the scene — and
+            // it is drawn as one of them. A filled capsule in a row of outlined
+            // pills reads as a different kind of control that happens to have
+            // been parked in the footer; the tone still tells work from rest.
+            if case .primary(let action) = presentation.controls,
+               presentation.primaryPlacement == .footer {
+                OrbitInlineActionButton(action: action, surface: .panel) { model.perform($0) }
+            }
+
             // The panel has no rail, so the rail's single contextual action —
             // Break, Restart, or Back to work — lives here instead. Same slot,
             // same rule, so the two platforms never offer different things.
             if let action = presentation.workdayRail?.inlineAction {
                 OrbitInlineActionButton(action: action, surface: .panel) { model.perform($0) }
+            }
+
+            // Leaving the timer, next to restarting it rather than behind the
+            // ellipsis: the two are the same kind of decision about the phase
+            // on screen, and only one of them was reachable in one click.
+            if let end = presentation.endPomodoro {
+                OrbitInlineActionButton(action: end, surface: .panel) { model.perform($0) }
             }
 
             Spacer(minLength: 0)
@@ -137,7 +181,11 @@ struct HourglassPanel: View {
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
+            // `.borderlessButton` hands the label to AppKit, which re-tints the
+            // glyph with the system's label colour and threw the palette away.
+            // The button style keeps the label exactly as it is drawn above.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
             .help(Text("More actions"))

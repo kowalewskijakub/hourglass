@@ -4,6 +4,7 @@
 DerivedData/
 build/
 build-ios/
+build-release/
 .build/
 
 # macOS

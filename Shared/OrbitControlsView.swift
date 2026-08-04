@@ -128,9 +128,16 @@ struct OrbitInlineActionButton: View {
     var body: some View {
         Button { perform(action.action) } label: {
             Label(action.title, systemImage: action.icon.symbolName)
-                .font(.system(size: surface == .phone ? 11.5 : 11, weight: .heavy))
+                // Medium, not heavy. These are secondary controls sitting under
+                // the numeral and beside the transport; drawn bold they read as
+                // the loudest thing on a surface whose subject is the clock.
+                .font(.system(size: surface == .phone ? 11.5 : 11, weight: .medium))
                 .labelStyle(.titleAndIcon)
                 .lineLimit(1)
+                // The panel footer can hold two of these beside a filled primary
+                // capsule ("Back to work" and "End Pomodoro" is the widest pair).
+                // Shrinking a little beats an ellipsis in the middle of a label.
+                .minimumScaleFactor(0.85)
                 .foregroundStyle(tint)
                 .padding(.horizontal, 12)
                 // 44 pt of target on the phone even though the capsule is drawn

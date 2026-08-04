@@ -128,9 +128,19 @@ extension Color {
 /// not shuffle sideways as it ticks; sizes scale with Dynamic Type through
 /// `ScaledMetric` at the call sites that can afford to grow.
 enum OrbitType {
+    /// The panel's numeral is **one size**, whatever it happens to be counting.
+    ///
+    /// Sizing it by kind made the clock jump between 33 and 42 pt as the user
+    /// moved in and out of a Pomodoro — the same number, in the same place,
+    /// resizing on a state change, which reads as a layout glitch rather than
+    /// as a hierarchy. What the number means is already carried by the label
+    /// above it. (The phone keeps its per-kind scale: its crop is twice as tall
+    /// and a running `7:32:15` at countdown size would not fit beside it.)
     static func numeral(_ kind: NumeralKind, surface: OrbitSurface) -> Font {
         let size: CGFloat
         switch (kind, surface) {
+        case (_, .panel):
+            size = 42
         case (.countdown, .phone), (.frozenCountdown, .phone):
             size = 64
         case (.workedToday, .phone):
@@ -139,12 +149,8 @@ enum OrbitType {
             size = 56
         case (.wallClock, .phone):
             size = 55
-        case (.countdown, .panel), (.frozenCountdown, .panel):
-            size = 42
-        case (.workedToday, .panel):
-            size = 33
-        case (.breakElapsed, .panel), (.wallClock, .panel):
-            size = 38
+        case (.overrun, .phone):
+            size = 60
         }
         return .system(size: size, weight: .semibold).monospacedDigit()
     }
@@ -184,6 +190,7 @@ extension OrbitIcon {
         // directions, and every one of them names its destination out loud.
         case .previous: return "chevron.left"
         case .next: return "chevron.right"
+        case .continueOn: return "checkmark"
         case .clockIn: return "arrow.up.to.line"
         case .clockOut: return "rectangle.portrait.and.arrow.right"
         // Distinct from clock out: one stops the timer, the other ends the day.

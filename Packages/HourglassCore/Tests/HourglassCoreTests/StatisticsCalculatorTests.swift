@@ -171,4 +171,98 @@ import Foundation
         ]
         #expect(calc.totalFocusTime(in: sessions, inWeekOf: inWeek) == 50 * 60)
     }
+
+    /// Regression: the chart stacked raw focus on top of the rest of the
+    /// worked time, so a Pomodoro run while clocked out drew a bar taller than
+    /// the worked total printed beside it.
+    @Test func aDaysStackedPartsNeverExceedItsWorkedTime() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 18)
+        let stats = calc.dailyWorkStats(
+            clockSessions: [
+                clock(date(2026, 3, 10, 9), out: date(2026, 3, 10, 9).addingTimeInterval(6 * 60)),
+            ],
+            focusSessions: [focus(date(2026, 3, 10, 14), minutes: 60)],                 // off the clock
+            lastDays: 1,
+            endingOn: now
+        )
+        let day = stats[0]
+
+        #expect(day.workedMinutes == 6)
+        #expect(day.focusMinutes == 60)
+        #expect(day.focusedWorkMinutes == 6)
+        #expect(day.focusedWorkMinutes + day.otherMinutes == day.workedMinutes)
+        #expect(day.focusShare == 1)
+    }
+
+    @Test func focusInsideWorkedTimeIsStackedWhole() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let stats = calc.dailyWorkStats(
+            clockSessions: [clock(date(2026, 3, 10, 9), out: date(2026, 3, 10, 13))], // 4h
+            focusSessions: [focus(date(2026, 3, 10, 9), minutes: 50)],
+            lastDays: 1,
+            endingOn: date(2026, 3, 10, 18)
+        )
+        let day = stats[0]
+
+        #expect(day.focusedWorkMinutes == 50)
+        #expect(day.otherMinutes == 190)
+        #expect(day.focusedWorkMinutes + day.otherMinutes == day.workedMinutes)
+    }
+
+    // MARK: Range summary
+
+    @Test func aRangeSummaryAveragesOverTheDaysActuallyWorked() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 18)
+        let sessions = [
+            clock(date(2026, 3, 9, 9), out: date(2026, 3, 9, 13)),  // 4h
+            clock(date(2026, 3, 10, 9), out: date(2026, 3, 10, 11)), // 2h
+        ]
+        let stats = calc.dailyWorkStats(
+            clockSessions: sessions,
+            focusSessions: [focus(date(2026, 3, 10, 9), minutes: 60)],
+            lastDays: 7,
+            endingOn: now
+        )
+        let summary = calc.summary(of: stats)
+
+        #expect(summary.dayCount == 7)
+        #expect(summary.daysWorked == 2)              // not 7 — five days were off
+        #expect(summary.totalWorked == 6 * 3600)
+        #expect(summary.averagePerWorkedDay == 3 * 3600)
+        #expect(summary.totalFocus == 3600)
+        #expect(summary.focusShare == 1.0 / 6.0)
+        #expect(summary.best?.date == utc.startOfDay(for: date(2026, 3, 9)))
+    }
+
+    @Test func anEmptyRangeSummarisesToZeroWithoutDividingByIt() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let stats = calc.dailyWorkStats(
+            clockSessions: [], focusSessions: [], lastDays: 7, endingOn: date(2026, 3, 10)
+        )
+        let summary = calc.summary(of: stats)
+
+        #expect(summary.isEmpty)
+        #expect(summary.daysWorked == 0)
+        #expect(summary.averagePerWorkedDay == 0)
+        #expect(summary.focusShare == 0)
+        #expect(summary.best == nil)
+    }
+
+    /// Oldest first in, most recent out: a day that equals the record is the
+    /// one the user just had, and reading "best day: last Tuesday" would be
+    /// telling them the wrong thing about today.
+    @Test func aTiedBestDayResolvesToTheMoreRecentOne() {
+        let calc = StatisticsCalculator(calendar: utc)
+        let now = date(2026, 3, 10, 18)
+        let sessions = [
+            clock(date(2026, 3, 8, 9), out: date(2026, 3, 8, 13)),
+            clock(date(2026, 3, 10, 9), out: date(2026, 3, 10, 13)),
+        ]
+        let stats = calc.dailyWorkStats(
+            clockSessions: sessions, focusSessions: [], lastDays: 7, endingOn: now
+        )
+        #expect(calc.summary(of: stats).best?.date == utc.startOfDay(for: now))
+    }
 }

@@ -595,11 +595,27 @@ final class SyncService {
         // `is_running` is false for both — so branch on the phase. A pause
         // travels as the pair (paused_at, end_date): what is left to run is
         // their difference, so it stays frozen however long the row sits there.
-        let pausedAt: Date? = engine.phase == .paused ? now : nil
+        // The *actual* freeze instant, not the moment this push happened. The
+        // two are usually a beat apart, and that beat mattered once the linked
+        // rest started deriving its identity from `pausedAt`: a push that
+        // crossed a second boundary made the two devices name the same rest
+        // differently and open one each. It is also simply more truthful —
+        // "paused since" now reads the same on both.
+        let pausedAt: Date? = engine.phase == .paused ? (engine.pausedAt ?? now) : nil
+        let deadline: Date? = {
+            guard engine.phase != .idle else { return nil }
+            if engine.isOverrunning { return engine.plannedEnd }
+            return (pausedAt ?? now).addingTimeInterval(engine.remaining)
+        }()
         let row = LiveStateRow(
             user_id: "",
             kind: engine.kind.rawValue,
-            end_date: engine.phase == .idle ? nil : (pausedAt ?? now).addingTimeInterval(engine.remaining),
+            // An overrun has no time left to add, so deriving the deadline from
+            // `remaining` published the push instant as the end and threw the
+            // finish away — every push re-dated it and the two devices drifted
+            // apart on how far over they were. The real deadline is the truth
+            // and it is already in hand.
+            end_date: deadline,
             is_running: engine.isRunning,
             paused_at: pausedAt,
             cycle_position: engine.cyclePosition,

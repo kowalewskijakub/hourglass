@@ -61,6 +61,9 @@ public enum PomodoroState: Equatable, Sendable {
     case ready(kind: SessionKind, remaining: TimeInterval)
     case running(kind: SessionKind, remaining: TimeInterval)
     case paused(kind: SessionKind, remaining: TimeInterval)
+    /// The clock ran out and the phase is counting on past it, waiting for the
+    /// user to continue. Nothing advances by itself.
+    case overrun(kind: SessionKind, over: TimeInterval)
     case completed(kind: SessionKind)
 
     public var isIdle: Bool { self == .idle }
@@ -72,14 +75,21 @@ public enum PomodoroState: Equatable, Sendable {
     public var kind: SessionKind? {
         switch self {
         case .idle: return nil
-        case .ready(let kind, _), .running(let kind, _), .paused(let kind, _), .completed(let kind):
+        case .ready(let kind, _), .running(let kind, _), .paused(let kind, _),
+             .overrun(let kind, _), .completed(let kind):
             return kind
         }
     }
 
+    /// How far past its planned end this phase has run. Zero unless overrunning.
+    public var overrun: TimeInterval {
+        if case .overrun(_, let over) = self { return over }
+        return 0
+    }
+
     public var remaining: TimeInterval {
         switch self {
-        case .idle, .completed: return 0
+        case .idle, .completed, .overrun: return 0
         case .ready(_, let remaining), .running(_, let remaining), .paused(_, let remaining):
             return remaining
         }
@@ -148,16 +158,25 @@ extension PomodoroState {
         kind: SessionKind,
         remaining: TimeInterval,
         plannedDuration: TimeInterval,
-        cyclePosition: Int,
+        overrun: TimeInterval,
+        isCycleUnderWay: Bool,
         linkedBreak: LinkedBreak?
     ) -> PomodoroState {
         switch phase {
         case .running:
+            // Past the deadline and still counting: the phase has finished but
+            // has not been left, and only the user leaves it.
+            guard overrun <= 0 else { return .overrun(kind: kind, over: overrun) }
             return .running(kind: kind, remaining: remaining)
         case .paused:
             return .paused(kind: kind, remaining: remaining)
         case .idle:
-            guard cyclePosition > 0 else { return .idle }
+            // Deliberately not "position past the first focus", which is what
+            // this used to ask. That reading had one blind spot and the user
+            // found it: scrubbing back to the first focus leaves position 0 and
+            // an idle phase, and the app concluded there was no Pomodoro at all
+            // — the face dropped to a bare "Break" with the timer gone.
+            guard isCycleUnderWay else { return .idle }
             // A break that ran out while auto-start-next-focus was off: the
             // engine has already staged the focus, but the linked work break is
             // still open and work must not resume until the user acts.

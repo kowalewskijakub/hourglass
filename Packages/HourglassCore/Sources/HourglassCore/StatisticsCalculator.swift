@@ -197,6 +197,16 @@ public struct StatisticsCalculator: Sendable {
 
         /// Worked time that wasn't inside a Pomodoro, for stacking on a chart.
         public var otherMinutes: Double { max(0, workedMinutes - focusMinutes) }
+
+        /// Focus that happened *inside* worked time.
+        ///
+        /// A Pomodoro run while clocked out is not worked time by the app's own
+        /// definition — which is why `focusShare` has always capped at 1 — so a
+        /// chart of worked time stacks this rather than `focusMinutes`.
+        /// Stacked on `otherMinutes` it sums to exactly `workedMinutes`, which
+        /// is what stops a bar from standing taller than the total printed
+        /// above it.
+        public var focusedWorkMinutes: Double { min(focusMinutes, workedMinutes) }
     }
 
     /// Worked vs focused time per day, oldest first.
@@ -214,6 +224,49 @@ public struct StatisticsCalculator: Sendable {
             let focused = totalFocusTime(in: focusSessions, on: day) / 60
             return DailyWorkStat(date: day, workedMinutes: worked, focusMinutes: focused)
         }
+    }
+
+    /// What a span of days adds up to. Everything Stats puts above the chart,
+    /// derived from the same per-day rows the chart draws, so a headline can
+    /// never disagree with the bars underneath it.
+    public struct RangeSummary: Sendable, Hashable {
+        /// Days the range covers, whether or not they were worked.
+        public let dayCount: Int
+        /// Days with any worked time on them.
+        public let daysWorked: Int
+        public let totalWorked: TimeInterval
+        public let totalFocus: TimeInterval
+        public let best: DailyWorkStat?
+
+        /// Averaged over the days actually worked, not over the calendar.
+        /// A week off does not make the four days worked look like short ones.
+        public var averagePerWorkedDay: TimeInterval {
+            guard daysWorked > 0 else { return 0 }
+            return totalWorked / Double(daysWorked)
+        }
+
+        /// Share of worked time spent inside a Pomodoro, 0...1.
+        public var focusShare: Double {
+            guard totalWorked > 0 else { return 0 }
+            return min(1, totalFocus / totalWorked)
+        }
+
+        public var isEmpty: Bool { totalWorked <= 0 && totalFocus <= 0 }
+    }
+
+    /// Roll a run of daily rows up into one summary.
+    public func summary(of stats: [DailyWorkStat]) -> RangeSummary {
+        let worked = stats.filter { $0.workedMinutes > 0 }
+        return RangeSummary(
+            dayCount: stats.count,
+            daysWorked: worked.count,
+            totalWorked: stats.reduce(0) { $0 + $1.workedMinutes } * 60,
+            totalFocus: stats.reduce(0) { $0 + $1.focusMinutes } * 60,
+            // Reversed so ties go to the more recent day: `stats` is oldest
+            // first, and `max(by:)` keeps the first of equal elements — a day
+            // matching last week's record should read as the current best.
+            best: worked.reversed().max { $0.workedMinutes < $1.workedMinutes }
+        )
     }
 
     /// When a day started and ended on the clock, and how many times it was
